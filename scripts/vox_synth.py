@@ -49,8 +49,13 @@ def main(text_file, ref_wav, ref_txt, out, style=""):
     for i, (c, gap) in enumerate(cs):
         status.stage("Synthesize", "running", f"chunk {i + 1}/{len(cs)}")
         t = time.time()
-        wav = model.generate(text=f"({style}){c}" if style else c, prompt_wav_path=ref_wav, prompt_text=ref_text,
-                             reference_wav_path=ref_wav, cfg_value=2.0, inference_timesteps=10)
+        if style:
+            # controllable cloning: the parenthetical is only read as an instruction when the reference is NOT
+            # also given as a transcribed prompt (continuation mode treats it as text to speak)
+            wav = model.generate(text=f"({style}){c}", reference_wav_path=ref_wav, cfg_value=2.0, inference_timesteps=10)
+        else:
+            wav = model.generate(text=c, prompt_wav_path=ref_wav, prompt_text=ref_text,
+                                 reference_wav_path=ref_wav, cfg_value=2.0, inference_timesteps=10)
         a = np.asarray(wav, dtype=np.float32).squeeze()
         print(f"chunk {i + 1}/{len(cs)} {len(a) / sr:.1f}s audio in {time.time() - t:.1f}s", flush=True)
         parts += [a, np.zeros(int(sr * gap), np.float32)]
