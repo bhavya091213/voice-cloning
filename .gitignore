@@ -1,0 +1,26 @@
+﻿# environments / vendored libs
+.venv/
+libs_llm/
+libs_qwen/
+libs_vox/
+__pycache__/
+*.pyc
+
+# model weights (large, downloaded separately)
+models/
+
+# personal voice data and generated audio
+reference/
+output/
+work/
+
+# secrets
+dashboard/token.txt
+*.key
+.env
+
+# misc
+*.log
+*.wav
+*.flac
+*.mp3

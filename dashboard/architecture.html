@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VoiceClone Architecture</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--line:#262b36;--tx:#e6e8ee;--mut:#8b93a7;--ok:#3ecf8e;--run:#f5b942;--err:#ef5a5a;--acc:#6aa7ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.55 system-ui,Segoe UI,sans-serif;padding:20px;max-width:1100px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
+a{color:var(--acc)}.mut{color:var(--mut)}header{margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.dia{overflow-x:auto;background:#0b0d11;border-radius:8px;padding:10px}
+.legend span{display:inline-block;border-radius:5px;padding:1px 9px;margin:2px 6px 2px 0;font-size:12px;border:1px solid}
+.l-model{background:#1d3a63;border-color:#6aa7ff}.l-dsp{background:#2a2f3b;border-color:#5a6479}.l-io{background:#173d2d;border-color:#3ecf8e}.l-warn{background:#4a3a14;border-color:#f5b942}
+.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}td,th{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--mut);font-weight:500;white-space:nowrap}
+td:first-child{white-space:nowrap;font-weight:600}code{background:#0b0d11;border-radius:4px;padding:1px 5px;font-size:12.5px}
+ul{margin:6px 0;padding-left:20px}li{margin:3px 0}.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+</style></head><body>
+<header><h1>VoiceClone architecture</h1>
+<div class="mut"><a href="/">Studio</a> · <a href="/dashboard">Live dashboard</a> · <a href="/models">Model internals</a> · input to output, every step, with the model or algorithm used</div></header>
+
+<div class="card"><h2>End-to-end pipeline</h2>
+<div class="legend"><span class="l-io">input / output</span><span class="l-dsp">algorithm / DSP (no ML)</span><span class="l-model">neural model</span></div>
+<div class="dia"><pre class="mermaid">
+flowchart TD
+  subgraph S1["1 - CAPTURE  (browser)"]
+    A["Mic via getUserMedia<br/>echo cancel, noise suppress, AGC all OFF"]:::io --> B["AudioWorklet raw PCM capture<br/>encoded as 32-bit float WAV, 48 kHz"]:::dsp
+  end
+  B -->|"HTTPS upload through Cloudflare tunnel"| C
+  subgraph S2["2 - INGEST  (server, CPU)"]
+    C["ffmpeg decode to mono, 48 kHz, float32"]:::dsp --> D["Quality stats<br/>peak dB, clip %, noise floor = quietest 0.5 s window,<br/>SNR = 75th pct voiced level minus noise floor"]:::dsp
+  end
+  C -->|"parts/A.wav (raw, untouched)"| E
+  subgraph S3["3 - REFERENCE PICK  (one-time per speaker)"]
+    E["Whisper small, about 244M params<br/>word-level timestamps + transcript"]:::model --> F["Sentence windows of 9-20 s<br/>score = near 15 s, near 2.7 words/s,<br/>penalise digits and alliteration"]:::dsp
+    F --> G["Cut best window, 10 ms fades<br/>ref.wav + ref.txt"]:::io
+  end
+  TXT["Your text"]:::io --> H
+  subgraph S4["4 - TEXT PREP  (CPU)"]
+    H["Regex split at sentence ends<br/>chunks up to 280 chars<br/>gap after chunk 0.18 s, after paragraph 0.55 s"]:::dsp
+  end
+  subgraph S5["5 - SYNTHESIS  (GPU, bf16, 5.6 GB peak)"]
+    K["Qwen3-TTS-12Hz-1.7B-Base<br/>build voice-clone prompt once from ref.wav + ref.txt"]:::model
+    L["Per chunk: autoregressively generate codec tokens,<br/>decode to 24 kHz audio"]:::model
+    M["Concatenate chunks with fixed gaps<br/>raw.wav, 24 kHz"]:::io
+    K --> L
+    H --> L
+    L --> M
+  end
+  G --> K
+  M --> N
+  subgraph S6["6 - MASTERING  (CPU, 48 kHz)"]
+    N["Resample 24 to 48 kHz, polyphase"]:::dsp --> O["High-pass 70 Hz, 4th-order Butterworth, zero-phase"]:::dsp
+    O --> P["Optional spectral-gate denoise (off by default)"]:::dsp
+    P --> Q["De-ess: split at 5.5 kHz, compress high band only<br/>ratio 4, 1 ms attack, 40 ms release,<br/>threshold = 88th pct of band level"]:::dsp
+    Q --> R["EQ: +1 dB shelf 120 Hz, -1.5 dB 250 Hz,<br/>+1.2 dB 3.5 kHz, +1.5 dB shelf 8.5 kHz"]:::dsp
+    R --> S["3-band compressor, splits 180 Hz and 3.5 kHz<br/>ratio 2, threshold = 60th pct per band"]:::dsp
+    S --> T["Bus compressor, ratio 2.5<br/>threshold found by bisection so average<br/>gain reduction = 3.0 dB overall"]:::dsp
+    T --> U["Loudness to -16 LUFS (ITU BS.1770 gating)"]:::dsp
+    U --> V["Lookahead peak limiter 5 ms<br/>then 4x oversampled true-peak trim to -1 dBTP"]:::dsp
+  end
+  V --> W["output/job.wav<br/>24-bit, 48 kHz, -16 LUFS, -1 dBTP"]:::io
+  classDef io fill:#173d2d,stroke:#3ecf8e,color:#e6e8ee
+  classDef dsp fill:#2a2f3b,stroke:#5a6479,color:#e6e8ee
+  classDef model fill:#1d3a63,stroke:#6aa7ff,color:#e6e8ee
+</pre></div></div>
+
+<div class="card"><h2>Inside Qwen3-TTS (read from the model's config.json)</h2>
+<div class="dia"><pre class="mermaid">
+flowchart TD
+  RA["ref.wav, 24 kHz"]:::io --> ENC["Speech tokenizer encoder<br/>conv + 8-layer transformer<br/>12.5 frames per second<br/>16 RVQ codebooks x 2048 entries<br/>codebook 0 semantic, 1-15 acoustic"]:::model
+  RA --> SPK["Speaker encoder<br/>2048-d speaker embedding"]:::model
+  RT["ref.txt transcript"]:::io --> BPE
+  TX["target text chunk"]:::io --> BPE["Qwen BPE tokenizer<br/>vocab 151,936"]:::dsp
+  ENC -->|"reference codec tokens"| PR
+  SPK --> PR
+  BPE --> PR["Conditioning prompt<br/>speaker vector + reference text and tokens + target text<br/>(simplified)"]:::dsp
+  PR --> TALK["Talker: 28-layer decoder-only transformer<br/>d=2048, 16 heads, 8 KV heads, RoPE<br/>predicts codebook 0 for the next frame"]:::model
+  TALK -->|"every frame, about 80 ms"| CP["Code predictor: 5-layer transformer, d=1024<br/>fills codebooks 1-15 for that frame"]:::model
+  CP --> DEC["Tokenizer decoder<br/>8-layer transformer + conv upsampling x1920<br/>(frames to samples)"]:::model
+  DEC --> WAV["24 kHz waveform<br/>no content above about 12 kHz"]:::io
+  classDef io fill:#173d2d,stroke:#3ecf8e,color:#e6e8ee
+  classDef dsp fill:#2a2f3b,stroke:#5a6479,color:#e6e8ee
+  classDef model fill:#1d3a63,stroke:#6aa7ff,color:#e6e8ee
+</pre></div>
+<div class="mut" style="margin-top:8px">Sampling is stochastic (top-k 50, temperature 1.0 defaults), so the same text gives a slightly different read each run. The Base model has no emotion or style input: delivery comes from the reference clip plus the meaning of the text.</div></div>
+
+<div class="card"><h2>Stage by stage: input, output, method, weak spots</h2>
+<div class="scroll"><table>
+<thead><tr><th>Stage</th><th>Input &rarr; output</th><th>Method / model</th><th>Weak spots and what to ideate on</th></tr></thead><tbody>
+<tr><td>Capture</td><td>Your voice &rarr; 32-bit float 48 kHz WAV</td><td>Browser mic with all processing off; AudioWorklet PCM</td><td>Result depends on your room and mic. Idea: guided mic check (level, room tone, reverb estimate) before recording.</td></tr>
+<tr><td>Ingest</td><td>Upload &rarr; mono 48 kHz float + quality badges</td><td>ffmpeg; peak, clipping, noise floor, SNR statistics</td><td>No reverb or sibilance check yet. Idea: reject or warn on room echo, plosives, clipping.</td></tr>
+<tr><td>Reference pick</td><td>Part A &rarr; one ~15 s clip + exact transcript</td><td>Whisper small timestamps; heuristic window scoring</td><td>Heuristic, not learned: it can't tell flat from expressive reading. The reference is the single biggest lever on cloned voice and delivery. Ideas: score candidates by speaker similarity and prosody variety; try several clips and A/B; a bank of per-emotion references from Part B.</td></tr>
+<tr><td>Text prep</td><td>Text &rarr; chunks of up to 280 chars with fixed gaps</td><td>Regex sentence splitter</td><td>Fixed gaps may not match natural rhythm. Idea: punctuation-aware gaps, or generate longer passages in one pass and compare, or stitch with crossfades.</td></tr>
+<tr><td>Synthesis</td><td>ref + text &rarr; 24 kHz speech</td><td><b>Qwen3-TTS-12Hz-1.7B-Base</b>: speaker embedding + in-context reference tokens; talker + code predictor produce 16-codebook RVQ tokens at 12.5 Hz; decoder to audio</td><td>Slow (about 4x slower than real time here). Quantised 12.5 Hz tokens cap fine detail and top-end. No style control. Ideas: Qwen3-TTS 0.6B for speed, or other models for quality; sampling temperature and top-k tuning; pick the best of N takes automatically; fine-tune on your voice (LoRA) instead of one-shot cloning.</td></tr>
+<tr><td>Master: tonal</td><td>24 kHz &rarr; 48 kHz, filtered, de-essed, EQ'd</td><td>Polyphase resample; zero-phase Butterworth; band-split compressor for de-essing; shelving and peaking EQ</td><td>The EQ is a fixed guess, not matched to your voice. Idea: match EQ to your own recording's spectrum, or to a studio reference.</td></tr>
+<tr><td>Master: dynamics</td><td>EQ'd audio &rarr; compressed, 3 dB average gain reduction</td><td>3-band compressor, then bus compressor with threshold chosen by bisection</td><td>Compression follows the target of 3 dB, but TTS audio is already fairly even. Ideas: make it optional, or measure whether it helps listener preference.</td></tr>
+<tr><td>Master: loudness</td><td>&rarr; -16 LUFS, -1 dBTP</td><td>BS.1770 integrated loudness; lookahead limiter; 4x oversampled true-peak check</td><td>Solid and standard. Target could be tuned per platform (e.g. -14 for streaming, -19 for podcasts).</td></tr>
+<tr><td>Bandwidth</td><td>24 kHz model output &rarr; 48 kHz file</td><td>Resampling only</td><td>No new content above about 12 kHz, which is the main gap versus true studio audio. Idea: audio super-resolution / bandwidth-extension model, evaluated by ear.</td></tr>
+</tbody></table></div></div>
+
+<div class="cols">
+<div class="card"><h2>Installed but not in the live path</h2><ul>
+<li><b>IndexTTS-2.5</b> (emotion vectors + duration control): works on the GPU, replaced by Qwen for the current test.</li>
+<li><b>Qwen3-4B-Instruct tagger</b>: LLM that split text into emotion and pace segments. Unused because Qwen3-TTS-Base can't take tags.</li>
+<li><b>Spectral-gate cleaner</b> (<code>noisereduce</code>): removed from the profile step as too invasive.</li>
+<li><b>DeepFilterNet</b>: failed to install on this machine.</li></ul></div>
+<div class="card"><h2>Measured so far</h2><ul>
+<li>Qwen3-TTS 1.7B: 5.6 GB peak VRAM, about 4.4 s compute per second of audio (first runs, includes warm-up).</li>
+<li>Mastering: about 4 s per job; lands at -16.0 LUFS, about -1.2 dBTP, about 3.0 dB gain reduction.</li>
+<li>One job (two short paragraphs): about 85-90 s end to end.</li></ul></div>
+</div>
+
+<div class="card"><h2>Ideas to explore next (untested)</h2>
+<div class="cols">
+<div><b>Naturalness and pacing</b><ul><li>Compare chunk size: sentence vs paragraph vs whole text</li><li>Punctuation-aware pauses instead of fixed gaps</li><li>Generate N takes per chunk, auto-pick by a quality score</li><li>Different reference clips, A/B them blind</li></ul></div>
+<div><b>Emotion and style</b><ul><li>Reference bank from your Part B lines (excited, soft, serious, sad...), picked per paragraph</li><li>LLM chooses the reference per sentence from your style description</li><li>Qwen3-TTS CustomVoice / VoiceDesign for instruct control (does not clone you directly)</li></ul></div>
+<div><b>Fidelity</b><ul><li>Fine-tune (LoRA) on your 2-minute recording or a longer one</li><li>Bandwidth extension above 12 kHz</li><li>Match mastering EQ to your recorded voice</li></ul></div>
+<div><b>Measurement</b><ul><li>Speaker-similarity score (embedding cosine) vs your real recording</li><li>Whisper word-error rate on outputs to catch skipped or mispronounced words</li><li>Automated MOS-style naturalness predictor, plus your own listening notes per job</li></ul></div>
+<div><b>Speed</b><ul><li>Qwen3-TTS 0.6B for drafts, 1.7B for finals</li><li>Keep the model loaded between jobs (saves load time)</li><li>Test whether disabling MIOpen workaround or other ROCm settings speeds generation</li></ul></div>
+</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'dark',securityLevel:'loose',flowchart:{htmlLabels:true,useMaxWidth:false,curve:'basis'},themeVariables:{fontSize:'14px'}});</script>
+</body></html>
