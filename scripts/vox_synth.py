@@ -6,8 +6,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, r"D:\VoiceClone\libs_vox")
 sys.path.insert(0, str(Path(__file__).parent))
+import paths  # noqa: E402
+sys.path.insert(0, str(paths.ROOT / "libs_vox"))
 import rocm_shim  # noqa: F401,E402
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
@@ -15,7 +16,7 @@ import torch  # noqa: E402
 import status  # noqa: E402
 from voxcpm import VoxCPM  # noqa: E402
 
-MODEL = r"D:\VoiceClone\models\voxcpm2"
+MODEL = str(paths.MODELS / "voxcpm2")
 MAX_CHARS = 280
 GAP_SENT, GAP_PARA = 0.18, 0.55
 
@@ -68,7 +69,9 @@ def main(text_file, ref_wav, ref_txt, out):
     text = Path(text_file).read_text(encoding="utf-8-sig").replace(chr(0xFEFF), "")
     ref_text = Path(ref_txt).read_text(encoding="utf-8").strip()
     status.stage("Synthesize", "running", "loading VoxCPM2")
-    model = VoxCPM.from_pretrained(MODEL, load_denoiser=False)
+    # macOS: explicit MPS device, no torch.compile (flaky on MPS); elsewhere keep the library defaults
+    extra = {"device": paths.device(), "optimize": False} if paths.IS_MAC else {}
+    model = VoxCPM.from_pretrained(MODEL, load_denoiser=False, **extra)
     sr = model.tts_model.sample_rate
     parts = []
     segs = segments(text)
@@ -86,7 +89,7 @@ def main(text_file, ref_wav, ref_txt, out):
         print(f"chunk {i + 1}/{len(segs)} {len(a) / sr:.1f}s audio in {time.time() - t:.1f}s  [{style}]", flush=True)
         parts += [a, np.zeros(int(sr * gap), np.float32)]
     sf.write(out, np.concatenate(parts), sr, subtype="FLOAT")
-    print("sample rate", sr, "peak VRAM GB", round(torch.cuda.max_memory_allocated() / 1e9, 1))
+    print("sample rate", sr, "peak VRAM GB", paths.peak_mem_gb())
 
 
 if __name__ == "__main__":

@@ -11,12 +11,12 @@ import sys
 from pathlib import Path
 
 # The tagger needs a newer transformers (guarded torch.distributed import) than IndexTTS's pinned one.
-sys.path.insert(0, r"D:\VoiceClone\libs_llm")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "libs_llm"))
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-LLM_DIR = Path(r"D:\VoiceClone\models\qwen3-4b-instruct")
+LLM_DIR = Path(__file__).resolve().parent.parent / "models" / "qwen3-4b-instruct"
 EMOTIONS = ["happy", "angry", "sad", "afraid", "disgusted", "melancholic", "surprised", "calm"]
 MAX_CHUNK_CHARS = 700
 
@@ -48,14 +48,17 @@ def _norm(s: str) -> str:
 
 
 class Tagger:
-    def __init__(self, device: str = "cuda"):
+    def __init__(self, device: str = ""):
+        if not device:
+            import torch as _t
+            device = "cuda" if _t.cuda.is_available() else ("mps" if _t.backends.mps.is_available() else "cpu")
         self.tok = AutoTokenizer.from_pretrained(LLM_DIR)
         self.model = AutoModelForCausalLM.from_pretrained(LLM_DIR, torch_dtype=torch.bfloat16).to(device)
         self.model.eval()
 
     def unload(self):
         del self.model
-        torch.cuda.empty_cache()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
     def _ask(self, style: str, context: str, chunk: str) -> str:
         user = (f"STYLE: {style}\n\nPREVIOUS CONTEXT (do not tag): {context or '(start of script)'}\n\n"

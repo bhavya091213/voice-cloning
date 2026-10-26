@@ -1,10 +1,13 @@
 """Enrollment: combine recorded parts, denoise (gently, keeping high end), pick the best 15 s cloning prompt."""
+import os
+from pathlib import Path
+
 import numpy as np
 import noisereduce as nr
 import soundfile as sf
 from scipy.signal import butter, sosfiltfilt
 
-REF_ROOT = r"D:\VoiceClone\reference"
+REF_ROOT = str(Path(os.environ.get("VOICECLONE_ROOT") or Path(__file__).resolve().parent.parent) / "reference")
 SR = 48000
 PROMPT_SEC = 15  # IndexTTS only uses the first 15 s of the speaker prompt
 

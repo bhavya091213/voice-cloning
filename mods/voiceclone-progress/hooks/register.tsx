@@ -3,9 +3,19 @@ import type { Register } from 'claude-code'
 
 import type { Check, Doctor, Output, Phase, Snap, View } from '../types'
 
-const ROOT = 'D:/VoiceClone'
-const PY = `${ROOT}/.venv/Scripts/python.exe`
-const VC = `${ROOT}/scripts/vc.py`
+// The repo root: two levels above this mod when it runs from <repo>/mods/voiceclone-progress, else the Windows default.
+let ROOT = 'D:/VoiceClone'
+let PY = `${ROOT}/.venv/Scripts/python.exe`
+let VC = `${ROOT}/scripts/vc.py`
+let IS_WIN = true
+const locate = ($: { plugin: { root: string } }) => {
+  const root = $.plugin.root.replaceAll('\\', '/')
+  const at = root.indexOf('/mods/voiceclone-progress')
+  if (at > 0) ROOT = root.slice(0, at)
+  IS_WIN = /^[A-Za-z]:/.test(ROOT)
+  PY = `${ROOT}/.venv/${IS_WIN ? 'Scripts/python.exe' : 'bin/python'}`
+  VC = `${ROOT}/scripts/vc.py`
+}
 const PANE = 'voiceclone'
 const snap = atom(
   { plugin: 'voiceclone-progress', key: 'snap' } as const,
@@ -26,6 +36,7 @@ const TABS: [View['tab'], string][] = [
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    locate($)
     await $.command.register({ name: 'vc-progress', description: 'Open the VoiceClone progress / outputs / doctor pane' })
     void $.ui.open({ id: PANE, title: 'VoiceClone' })
 
@@ -81,11 +92,13 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'vc-progress' }, async $ => {
+    locate($)
     await $.ui.open({ id: PANE, title: 'VoiceClone' })
     return { text: 'VoiceClone pane opened.' }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    locate($)
     const { Box, Text, Button } = $.ui.resolve(e)
     const s = await read($, snap)
     const v = await read($, view)
@@ -93,7 +106,9 @@ export const register: Register = on => {
 
     const play = async (o: Output) => {
       set({ note: `playing ${o.name}` })
-      const r = await $.process.run(['powershell', '-NoProfile', '-Command', `Start-Process -FilePath '${o.path}'`])
+      const r = await $.process.run(
+        IS_WIN ? ['powershell', '-NoProfile', '-Command', `Start-Process -FilePath '${o.path}'`] : ['open', o.path],
+      )
       if (r.exitCode !== 0) set({ note: `play failed: ${r.stderr.slice(0, 120)}` })
     }
     const runDoctor = async (fix: boolean) => {

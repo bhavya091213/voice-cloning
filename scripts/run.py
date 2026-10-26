@@ -11,11 +11,12 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import paths  # noqa: E402
 import status  # noqa: E402
 
-ROOT = Path(r"D:\VoiceClone")
-PY = str(ROOT / ".venv" / "Scripts" / "python.exe")
-ENV = {**os.environ, "HF_HOME": str(ROOT / "models" / "hf_cache"), "PYTHONIOENCODING": "utf-8"}
+ROOT = paths.ROOT
+PY = str(paths.VENV_PY)
+ENV = paths.child_env()
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--speaker", required=True)
@@ -71,7 +72,7 @@ try:
     status.stage("Master", "done", f"{stats['lufs']} LUFS · {stats['true_peak_db']} dBTP · {stats['gain_reduction_db']} dB GR")
 
     shutil.copy(jd / "master.wav", ROOT / "output" / f"{a.job}.wav")
-    status.stage("Output", "done", f"output\\{a.job}.wav")
+    status.stage("Output", "done", f"output/{a.job}.wav")
     save(state="done")
 except Exception as e:
     status.log(traceback.format_exc()[-600:])

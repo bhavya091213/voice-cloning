@@ -5,7 +5,7 @@ description: Run the local VoiceClone pipeline as phased steps (preflight, voice
 
 # VoiceClone — phased workflow
 
-Project: `D:\VoiceClone`. Everything goes through `scripts\vc.py`, run with `D:\VoiceClone\.venv\Scripts\python.exe` (call it `VC` below). `VC` records every phase in `work\skill_progress.json`, which the **voiceclone-progress** mod pane displays live.
+Project: the VoiceClone repo root (`D:\VoiceClone` on the Windows machine; wherever it is cloned on macOS). Everything goes through `scripts/vc.py`, run with the venv's Python: `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` on macOS (call it `VC` below). Paths below use Windows separators; swap `\` for `/` on macOS. `VC` records every phase in `work\skill_progress.json`, which the **voiceclone-progress** mod pane displays live.
 
 **Reuse first.** Reference audio lives in `reference\<speaker>\` and is never copied or overwritten. A *profile* (`profiles\<name>.json`) points at a speaker and stores default engine/style/LUFS/denoise. *Presets* (`configs\presets\*.json`) are named config bundles. Never re-enroll or write into `reference\<speaker>\parts` over existing recordings.
 

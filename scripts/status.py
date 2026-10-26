@@ -1,10 +1,12 @@
 """Tiny helper the pipeline uses to report progress to the dashboard."""
 import json
+import os
 import time
 from pathlib import Path
 
-STATUS = Path(r"D:\VoiceClone\work\status.json")
-LOG = Path(r"D:\VoiceClone\work\pipeline.log")
+ROOT = Path(os.environ.get("VOICECLONE_ROOT") or Path(__file__).resolve().parent.parent)
+STATUS = ROOT / "work" / "status.json"
+LOG = ROOT / "work" / "pipeline.log"
 STAGES = ["Synthesize", "Master", "Output"]
 
 

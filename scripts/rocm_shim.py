@@ -1,4 +1,4 @@
-"""Import this before transformers/indextts.
+"""Import this before transformers/indextts. (On macOS only the torchaudio and distributed stubs matter.)
 
 The Windows ROCm torch build has no torch.distributed, but some transformers versions import
 torch.distributed.tensor unconditionally. We never use distributed features, so stub it out.
@@ -9,7 +9,8 @@ import types
 import torch
 
 # MIOpen on Windows/gfx1030 throws miopenStatusUnknownError (batch_norm etc.); use native kernels.
-torch.backends.cudnn.enabled = False
+if sys.platform == "win32":
+    torch.backends.cudnn.enabled = False
 
 # torchaudio 2.9 routes load/save through torchcodec; use soundfile instead.
 import soundfile as _sf

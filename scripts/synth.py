@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, r"D:\VoiceClone\models\index-tts")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent / "models" / "index-tts"))
 import rocm_shim  # noqa: F401,E402
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
@@ -17,7 +17,7 @@ EMOTIONS = ["happy", "angry", "sad", "afraid", "disgusted", "melancholic", "surp
 segs = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 prompt, out = sys.argv[2], sys.argv[3]
 
-os.chdir(r"D:\VoiceClone\models\index-tts")
+os.chdir(str(__import__("pathlib").Path(__file__).resolve().parent.parent / "models" / "index-tts"))
 from indextts.infer_v2_5 import IndexTTS2  # noqa: E402
 
 tts = IndexTTS2(cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_bf16=True)

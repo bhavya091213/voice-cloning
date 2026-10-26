@@ -13,7 +13,10 @@ import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 import whisper  # noqa: E402
 
-REF = Path(r"D:\VoiceClone\reference")
+sys.path.insert(0, str(Path(__file__).parent))
+import paths  # noqa: E402
+
+REF = paths.REFERENCE
 
 
 def main(spk):
@@ -23,7 +26,7 @@ def main(spk):
         raise SystemExit("no recorded parts")
     src_name = "A" if "A" in parts else max(parts, key=lambda p: sf.info(parts[p]).duration)
     src = parts[src_name]
-    model = whisper.load_model("small", download_root=r"D:\VoiceClone\models\whisper")
+    model = whisper.load_model("small", download_root=str(paths.MODELS / "whisper"))
     r = model.transcribe(str(src), language="en", word_timestamps=True, fp16=False)
     words = [w for s in r["segments"] for w in s["words"]]
     sents, cur = [], []

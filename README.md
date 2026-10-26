@@ -1,14 +1,14 @@
 ﻿# VoiceClone
 
 Fully local voice-cloning TTS with a mastering chain, a browser Studio UI, a live pipeline dashboard, and agent skills (Claude Code and Codex) that run the whole workflow in phases.
-Built and tested on Windows 11 with an AMD RX 6900 XT (ROCm PyTorch). Everything runs on your own machine; no audio leaves it.
+Built and tested on Windows 11 with an AMD RX 6900 XT (ROCm PyTorch); macOS Apple Silicon (MPS) is supported but untested. Everything runs on your own machine; no audio leaves it.
 
 ## Contents
 
 | I want to… | Go to |
 |---|---|
 | Understand how it works | [Pipeline](#pipeline) · [Engines](#engines) · [Mastering](#mastering) |
-| Install and set it up | [Setup](#setup) · [Check dependencies](#check-dependencies-doctor) |
+| Install and set it up | [Setup](#setup) · [Windows](#windows-amd-rocm) · [macOS](#macos-apple-silicon) · [Check dependencies](#check-dependencies-doctor) |
 | Generate speech now | [Quick start](#quick-start) · [CLI](#command-line) |
 | Use the browser UI or phone | [Web UI](#web-ui) · [Remote access](#remote-access) |
 | Reuse a voice and settings | [Profiles and presets](#profiles-and-presets) |
@@ -46,17 +46,42 @@ Optional denoise, de-ess, EQ, 3-band compression, bus compression (~3 dB gain re
 
 ## Setup
 
-- Python 3.11 venv at `.venv`, PyTorch ROCm from `https://repo.amd.com/rocm/whl/gfx103X-all/` (torch 2.9.1, torchaudio 2.9.0).
-- Isolated package dirs, git-ignored, to avoid version conflicts: `libs_qwen` (qwen-tts), `libs_vox` (voxcpm), `libs_llm` (transformers 4.57.1).
+Supported platforms:
+
+| Platform | Backend | Status |
+|---|---|---|
+| Windows 11 + AMD GPU | ROCm PyTorch (CUDA also works) | developed and tested here |
+| macOS, Apple Silicon (M1 or later) | PyTorch MPS | supported, **untested** (written without a Mac to run it on) |
+
+All scripts find the repo from their own location (override with `VOICECLONE_ROOT`) and pick the device automatically (`cuda` > `mps` > `cpu`, override with `VOICECLONE_DEVICE`; `VOICECLONE_DTYPE` overrides the dtype, default bfloat16 on GPU).
+
+Common to both platforms:
+
+- Python 3.11 venv at `.venv`.
+- Isolated package dirs, git-ignored, to avoid version conflicts: `libs_qwen` (qwen-tts + transformers), `libs_vox` (voxcpm), `libs_llm` (transformers 4.57.1).
 - Model weights go in `models/` (git-ignored): `qwen3-tts-1.7b-base`, `qwen3-tts-tokenizer`, `voxcpm2`, `whisper`. Hugging Face cache at `models/hf_cache`.
 - `ffmpeg` must be installed.
-- Paths are currently hard-coded to `D:\VoiceClone` in several scripts.
-- Import `scripts/rocm_shim.py` first in any torch script. It works around ROCm-on-Windows gaps (stubbed `torch.distributed`, cuDNN/MIOpen disabled, soundfile-based `torchaudio.load/save`).
+- Import `scripts/rocm_shim.py` first in any torch script. It works around Windows/ROCm gaps (stubbed `torch.distributed`, cuDNN/MIOpen disabled on Windows, soundfile-based `torchaudio.load/save`).
+
+### Windows (AMD ROCm)
+
+PyTorch ROCm from `https://repo.amd.com/rocm/whl/gfx103X-all/` (torch 2.9.1, torchaudio 2.9.0), then `pip install -r requirements.txt`, then the TTS packages and weights as under macOS below (use `.venv\Scripts\python.exe`).
+
+### macOS (Apple Silicon)
+
+```
+git clone https://github.com/bhavya091213/voice-cloning.git && cd voice-cloning
+bash scripts/setup_mac.sh
+```
+
+The script installs Python 3.11, ffmpeg and cloudflared with Homebrew, creates `.venv`, installs PyTorch (MPS) and `requirements.txt`, installs the two TTS packages into `libs_qwen` / `libs_vox`, downloads the weights from Hugging Face (`openbmb/VoxCPM2`, `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, `Qwen/Qwen3-TTS-Tokenizer-12Hz`, about 15 GB), then runs the doctor. Run commands with `.venv/bin/python` instead of `.venv\Scripts\python.exe`.
+
+Mac notes: unsupported MPS ops fall back to CPU (`PYTORCH_ENABLE_MPS_FALLBACK=1`, set for you); `torch.compile` is turned off for VoxCPM2 on Mac; generation will be slower than a discrete GPU; the live dashboard shows RAM but no GPU stats.
 
 ### Check dependencies (doctor)
 
 ```
-.venv\Scripts\python.exe scripts\vc.py doctor          # report
+.venv\Scripts\python.exe scripts\vc.py doctor          # report (macOS: .venv/bin/python scripts/vc.py ...)
 .venv\Scripts\python.exe scripts\vc.py doctor --fix    # also create folders, start server/tunnel
 ```
 
@@ -100,6 +125,7 @@ Access is protected by a key in `dashboard/token.txt` (auto-generated on first r
 Use a Cloudflare quick tunnel to reach the Studio from a phone:
 
 ```
+# macOS: brew install cloudflared
 cloudflared tunnel --url http://127.0.0.1:8787 --no-autoupdate --protocol http2
 ```
 
@@ -165,7 +191,7 @@ Install: `claude --plugin-dir mods/voiceclone-progress` from the repo root.
 ## Repository layout
 
 ```
-scripts/     pipeline code (synth, enroll, master, run, status, vc, rocm_shim)
+scripts/     pipeline code (synth, enroll, master, run, status, vc, paths, rocm_shim, setup_mac.sh)
 dashboard/   web server and HTML pages
 configs/     reusable presets
 profiles/    your voice profiles (git-ignored except example.json)
@@ -173,6 +199,7 @@ mods/        Claude Code mod (voiceclone-progress)
 .claude/     Claude Code skill
 .agents/     Codex skill
 docs/        notes, recording script
+requirements.txt   shared Python dependencies (torch is installed separately)
 reference/   per-speaker audio (git-ignored)
 models/      weights (git-ignored)
 work/        intermediates, job output, progress and doctor reports (git-ignored)
@@ -185,7 +212,7 @@ output/      final masters (git-ignored)
 
 - Mastering dulls 6-10 kHz by several dB (de-esser and high-band multiband); needs easing.
 - Qwen3-TTS Base has no emotion/instruction control.
-- Paths are hard-coded to `D:\VoiceClone`.
+- macOS support is untested; expect rough edges (MPS op fallbacks, speed). Please report failures from `vc.py doctor` and the pipeline log.
 
 ## Legacy / unused
 

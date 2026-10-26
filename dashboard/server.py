@@ -3,17 +3,18 @@ Run: python server.py   (serves http://127.0.0.1:8787)
 """
 import ctypes
 import json
+import sys
 import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(r"D:\VoiceClone")
+ROOT = Path(__file__).resolve().parent.parent
 STATUS = ROOT / "work" / "status.json"
 LOG = ROOT / "work" / "pipeline.log"
 PORT = 8787
-VRAM_TOTAL_GB = 16.0  # RX 6900 XT
+VRAM_TOTAL_GB = 16.0  # RX 6900 XT (Windows only; macOS has unified memory)
 
 MODELS = [
     # name, role, approx params, approx weights on disk (GB), est. min VRAM (GB), dir
@@ -35,6 +36,11 @@ def dir_gb(p):
 
 
 def ram():
+    if sys.platform != "win32":
+        import psutil
+        vm = psutil.virtual_memory()
+        return {"used_gb": round((vm.total - vm.available) / 1e9, 1), "total_gb": round(vm.total / 1e9, 1)}
+
     class MS(ctypes.Structure):
         _fields_ = [("l", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in
                     ("tp", "ap", "tpf", "apf", "tv", "av", "ae")]
@@ -50,6 +56,10 @@ PS = (r"$m=(Get-Counter '\GPU Adapter Memory(*)\Dedicated Usage').CounterSamples
 
 def gpu_loop():
     while True:
+        if sys.platform != "win32":  # Apple Silicon: unified memory, no per-GPU counters from the shell
+            state["gpu"] = {"error": "GPU stats unavailable on macOS (unified memory)"}
+            time.sleep(5)
+            continue
         try:
             out = subprocess.run(["powershell", "-NoProfile", "-Command", PS], capture_output=True, text=True, timeout=20).stdout
             d = json.loads(out)

@@ -17,7 +17,7 @@ max_gap = float(sys.argv[4]) if len(sys.argv) > 4 else 0.22
 tmp = Path(out_wav).with_suffix(".full.wav")
 subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src, "-ac", "1", "-ar", str(SR), "-c:a", "pcm_f32le", str(tmp)], check=True)
 x, _ = sf.read(tmp, dtype="float32")
-m = whisper.load_model("small", download_root=r"D:\VoiceClone\models\whisper")
+m = whisper.load_model("small", download_root=str(Path(__file__).resolve().parent.parent / "models" / "whisper"))
 r = m.transcribe(str(tmp), language="en", word_timestamps=True, fp16=False)
 words = [w for s in r["segments"] for w in s["words"]]
 text = " ".join(s["text"].strip() for s in r["segments"])

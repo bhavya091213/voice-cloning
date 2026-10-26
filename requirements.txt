@@ -1,0 +1,29 @@
+# Runtime dependencies shared by Windows and macOS. Install torch/torchaudio separately (see README Setup):
+#   macOS Apple Silicon: pip install torch torchaudio        (MPS backend is included)
+#   Windows AMD ROCm:    from https://repo.amd.com/rocm/whl/gfx103X-all/
+numpy
+scipy
+soundfile
+librosa
+openai-whisper
+noisereduce
+pyloudnorm
+pedalboard
+psutil
+accelerate
+safetensors
+huggingface-hub
+einops
+inflect
+addict
+wetext
+modelscope
+datasets<4
+pydantic
+tqdm
+simplejson
+sortedcontainers
+funasr
+argbind
+sox
+onnxruntime

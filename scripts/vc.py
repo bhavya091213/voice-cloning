@@ -9,8 +9,12 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(r"D:\VoiceClone")
-PY = str(ROOT / ".venv" / "Scripts" / "python.exe")
+sys.path.insert(0, str(Path(__file__).parent))
+import paths  # noqa: E402
+
+ROOT = paths.ROOT
+PY = str(paths.VENV_PY)
+IS_WIN, IS_MAC = paths.IS_WIN, paths.IS_MAC
 PROFILES, PRESETS, REF = ROOT / "profiles", ROOT / "configs" / "presets", ROOT / "reference"
 PROGRESS = ROOT / "work" / "skill_progress.json"
 PHASES = ["Preflight", "Profile", "Enroll", "Config", "Script", "Generate", "Review"]
@@ -172,7 +176,11 @@ def _up():
 
 def _tunnel():
     import re
-    r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cloudflared.exe", "/NH"], capture_output=True, text=True)
+    if IS_WIN:
+        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cloudflared.exe", "/NH"], capture_output=True, text=True)
+    else:
+        r = subprocess.run(["pgrep", "-x", "cloudflared"], capture_output=True, text=True)
+        r.stdout = "cloudflared" if r.returncode == 0 else ""
     log = ROOT / "work" / "tunnel.log"
     urls = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", log.read_text(errors="replace")) if log.exists() else []
     return "cloudflared" in r.stdout.lower(), (urls[-1] if urls else "")
@@ -180,7 +188,8 @@ def _tunnel():
 
 def cmd_doctor(a):
     """Dependency check; --fix applies safe repairs (create dirs, start server/tunnel). Never installs or deletes."""
-    flags = 0x08000000 | 0x00000008  # CREATE_NO_WINDOW | DETACHED_PROCESS
+    flags = (0x08000000 | 0x00000008) if IS_WIN else 0  # CREATE_NO_WINDOW | DETACHED_PROCESS
+    detach = {} if IS_WIN else {"start_new_session": True}
     res = []
 
     def add(id_, label, ok, detail="", fix=""):
@@ -198,13 +207,13 @@ def cmd_doctor(a):
         for n in names:
             add("pkg-" + n, f"package {n}", found.get(n), "", f"{PY} -m pip install {n}")
         if found.get("torch"):
-            r = subprocess.run([PY, "-c", "import torch;print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')"],
+            r = subprocess.run([PY, "-c", "import torch;c=torch.cuda.is_available();m=torch.backends.mps.is_available();print(torch.__version__, c, torch.cuda.get_device_name(0) if c else ('mps' if m else '-'))"],
                                capture_output=True, text=True, timeout=120)
             line = (r.stdout.strip().splitlines() or ["?"])[-1]
-            add("gpu", "GPU (ROCm torch)", " True " in f" {line} ", line, "reinstall ROCm torch from the AMD gfx103X index")
+            add("gpu", "GPU (MPS)" if IS_MAC else "GPU (ROCm torch)", (" True " in f" {line} ") or "mps" in line, line, "reinstall torch (macOS: pip install torch torchaudio; Windows: AMD gfx103X ROCm index)")
     for lib, mod in (("libs_qwen", "qwen_tts"), ("libs_vox", "voxcpm"), ("libs_llm", "transformers")):
         add("lib-" + lib, f"{lib}/{mod}", (ROOT / lib / mod).exists(), str(ROOT / lib), f"pip install --target {ROOT / lib} <pkg>")
-    add("ffmpeg", "ffmpeg on PATH", shutil.which("ffmpeg"), shutil.which("ffmpeg") or "", "winget install ffmpeg")
+    add("ffmpeg", "ffmpeg on PATH", shutil.which("ffmpeg"), shutil.which("ffmpeg") or "", "brew install ffmpeg" if IS_MAC else "winget install ffmpeg")
     for w in ("voxcpm2", "qwen3-tts-1.7b-base", "qwen3-tts-tokenizer", "whisper"):
         d = ROOT / "models" / w
         add("w-" + w, f"weights {w}", d.exists() and any(d.iterdir()), str(d), "download the model into models/")
@@ -216,20 +225,22 @@ def cmd_doctor(a):
         add("dir-" + d_.replace("/", "-"), f"folder {d_}", (ROOT / d_).exists(), "", "doctor --fix creates it")
     up = _up()
     if not up and a.fix:
-        subprocess.Popen([PY, str(ROOT / "dashboard" / "app_server.py")], cwd=str(ROOT), creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen([PY, str(ROOT / "dashboard" / "app_server.py")], cwd=str(ROOT), creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detach)
         time.sleep(6)
         up = _up()
     add("server", "Studio server :8787", up, "", "doctor --fix starts it")
     run, url = _tunnel()
     if not run and a.fix and shutil.which("cloudflared") and up:
         subprocess.Popen(["cloudflared", "tunnel", "--url", "http://127.0.0.1:8787", "--no-autoupdate", "--protocol", "http2", "--logfile", str(ROOT / "work" / "tunnel.log")],
-                         creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detach)
         time.sleep(10)
         run, url = _tunnel()
     add("tunnel", "Cloudflare tunnel", run, url, "doctor --fix starts it (new URL each time)")
     tok = ROOT / "dashboard" / "token.txt"
     add("token", "Studio access key", tok.exists(), "", "start the server once to generate it")
     for f in sorted(PROFILES.glob("*.json")) if PROFILES.exists() else []:
+        if f.stem.startswith("example"):
+            continue
         sp = json.loads(f.read_text(encoding="utf-8"))["speaker"]
         add("prof-" + f.stem, f"profile {f.stem} enrolled", enrolled(sp), f"reference/{sp}", f"vc.py enroll {f.stem}")
     summary = {"checked": time.time(), "ok": all(r["ok"] for r in res), "link": f"{url}/?key={tok.read_text().strip()}" if url and tok.exists() else "", "checks": res}

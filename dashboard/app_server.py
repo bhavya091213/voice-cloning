@@ -19,9 +19,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).parent
-ROOT = Path(r"D:\VoiceClone")
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(HERE.parent / "scripts"))
+import paths  # noqa: E402
+
+ROOT = paths.ROOT
 import server as dash  # noqa: E402  (snapshot() + gpu_loop())
 import clean  # noqa: E402
 import soundfile as sf  # noqa: E402
@@ -30,9 +32,10 @@ TOKEN_FILE = HERE / "token.txt"
 if not TOKEN_FILE.exists():
     TOKEN_FILE.write_text(secrets.token_urlsafe(18))
 TOKEN = TOKEN_FILE.read_text().strip()
-PY = str(ROOT / ".venv" / "Scripts" / "python.exe")
+PY = str(paths.VENV_PY)
 FFMPEG = shutil.which("ffmpeg") or next(iter(glob.glob(
-    str(Path.home() / "AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/**/bin/ffmpeg.exe"), recursive=True)), "ffmpeg")
+    str(Path.home() / "AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/**/bin/ffmpeg.exe"), recursive=True)
+    + glob.glob("/opt/homebrew/bin/ffmpeg") + glob.glob("/usr/local/bin/ffmpeg")), "ffmpeg")
 MAX_BODY = 200 * 1024 * 1024
 NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 FILE_RE = re.compile(r"^(reference/[a-z0-9_-]+/(raw|clean|ref|prompt_15s|prompt_expressive)\.wav|"

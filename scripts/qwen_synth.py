@@ -7,8 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, r"D:\VoiceClone\libs_qwen")
 sys.path.insert(0, str(Path(__file__).parent))
+import paths  # noqa: E402
+sys.path.insert(0, str(paths.ROOT / "libs_qwen"))
 import rocm_shim  # noqa: F401,E402
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
@@ -16,7 +17,7 @@ import torch  # noqa: E402
 import status  # noqa: E402
 from qwen_tts import Qwen3TTSModel  # noqa: E402
 
-MODEL = r"D:\VoiceClone\models\qwen3-tts-1.7b-base"
+MODEL = str(paths.MODELS / "qwen3-tts-1.7b-base")
 MAX_CHARS = 280
 GAP_SENT, GAP_PARA = 0.18, 0.55
 
@@ -44,7 +45,7 @@ def main(text_file, ref_wav, ref_txt, out):
     text = Path(text_file).read_text(encoding="utf-8-sig").replace("\ufeff", "")
     ref_text = Path(ref_txt).read_text(encoding="utf-8").strip()
     status.stage("Synthesize", "running", "loading Qwen3-TTS")
-    model = Qwen3TTSModel.from_pretrained(MODEL, device_map="cuda:0", dtype=torch.bfloat16, attn_implementation="sdpa")
+    model = Qwen3TTSModel.from_pretrained(MODEL, device_map=paths.device(), dtype=paths.dtype(), attn_implementation="sdpa")
     prompt = model.create_voice_clone_prompt(ref_audio=ref_wav, ref_text=ref_text, x_vector_only_mode=False)
     parts, sr = [], 24000
     cs = chunks(text)
@@ -56,7 +57,7 @@ def main(text_file, ref_wav, ref_txt, out):
         print(f"chunk {i + 1}/{len(cs)} {len(a) / sr:.1f}s audio in {time.time() - t:.1f}s", flush=True)
         parts += [a, np.zeros(int(sr * gap), np.float32)]
     sf.write(out, np.concatenate(parts), sr, subtype="FLOAT")
-    print("peak VRAM GB", round(torch.cuda.max_memory_allocated() / 1e9, 1))
+    print("peak VRAM GB", paths.peak_mem_gb())
 
 
 if __name__ == "__main__":
