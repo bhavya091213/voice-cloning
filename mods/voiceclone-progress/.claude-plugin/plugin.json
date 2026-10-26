@@ -1,0 +1,1 @@
+{ "name": "voiceclone-progress", "version": "0.1.0", "description": "Live pane tracking the VoiceClone skill phases and pipeline stages", "types": "./types/index.d.ts" }

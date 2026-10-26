@@ -83,4 +83,4 @@ output/      final masters (git-ignored)
 - `profiles/<name>.json` + `configs/presets/*.json`: reusable voices and settings (reference audio stays in `reference/`).
 - `.claude/skills/voiceclone` (Claude Code) and `.agents/skills/voiceclone` (Codex): the same phased workflow over `scripts/vc.py`.
 - `python scripts/vc.py doctor [--fix]`: dependency check, writes `work/doctor.json`.
-- The `voiceclone-progress` Claude mod (`/vc-progress`) shows phases, output playback and the doctor.
+- The `voiceclone-progress` Claude mod (`mods/voiceclone-progress`, `/vc-progress`) shows phases, output playback and the doctor.
