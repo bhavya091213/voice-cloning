@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ (rocm_shim, tagger)
 import rocm_shim  # noqa: F401,E402
 import tagger_vox  # noqa: E402
 

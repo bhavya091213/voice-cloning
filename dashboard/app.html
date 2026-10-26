@@ -4,68 +4,246 @@
 <style>
 :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--tx:#e6e8ee;--mut:#8b93a7;--ok:#3ecf8e;--run:#f5b942;--err:#ef5a5a;--acc:#6aa7ff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 system-ui,Segoe UI,sans-serif;padding:20px;max-width:1000px;margin-inline:auto}
-h1{font-size:20px;margin:0}h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
-header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:16px}a{color:var(--acc)}
+h1{font-size:20px;margin:0}h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}a{color:var(--acc)}
+header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+nav{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--mut);padding:8px 14px}
+nav button.on{color:var(--tx);border-bottom-color:var(--acc)}nav button:hover{color:var(--tx)}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:12px;padding:2px 10px;font-size:12px;color:var(--mut)}
+.pill.busy{color:var(--run);border-color:#6b5320}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
-.mut{color:var(--mut)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.mut{color:var(--mut)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.gap{margin-top:10px}
 button{background:#232938;color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:8px 14px;font:inherit;cursor:pointer}
 button:hover{border-color:var(--acc)}button.pri{background:var(--acc);color:#07101f;border-color:var(--acc);font-weight:600}
 button.rec{background:#5b1f24;border-color:var(--err)}button:disabled{opacity:.45;cursor:not-allowed}
-input,textarea{background:#0b0d11;color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit;width:100%}
-textarea{min-height:130px;resize:vertical}input[type=number]{width:90px}input[type=range]{padding:0}
+input,textarea,select{background:#0b0d11;color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit;width:100%}
+select{width:auto}textarea{min-height:130px;resize:vertical}input[type=number]{width:90px}input[type=range]{padding:0;width:160px}input[type=checkbox]{width:auto}
+label{color:var(--mut)}label.k{display:inline-flex;gap:6px;align-items:center}
 .part{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}
 .script{white-space:pre-wrap;background:#0b0d11;border-radius:6px;padding:10px;margin:8px 0;max-height:230px;overflow:auto;font-size:13.5px}
 .meter{height:8px;background:#0b0d11;border-radius:5px;overflow:hidden;width:200px}.meter i{display:block;height:100%;width:0;background:var(--ok)}
 .badge{display:inline-block;border:1px solid var(--line);border-radius:12px;padding:1px 9px;font-size:12px;margin:2px 4px 2px 0}
 .good{color:var(--ok);border-color:#24533f}.warn{color:var(--run);border-color:#6b5320}.bad{color:var(--err);border-color:#6b2a2a}
+.chip{cursor:pointer;color:var(--acc);border-color:#2b4a7a;background:none;font:inherit;font-size:12px}.chip:hover{background:#1a2740}
 audio{width:100%;margin-top:6px}.stages{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
 .st{flex:1 1 120px;border:1px solid var(--line);border-radius:8px;padding:6px 10px}.st b{display:block;font-size:13px}.st small{color:var(--mut)}
 .pending{opacity:.5}.running{border-color:var(--run)}.running b{color:var(--run)}.done{border-color:#24533f}.done b{color:var(--ok)}.error{border-color:var(--err)}.error b{color:var(--err)}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--mut);font-weight:500}
 .scroll{overflow-x:auto}.cols{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
 pre{margin:0;max-height:160px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;color:#b8c0d4;white-space:pre-wrap}
+code{background:#0b0d11;border-radius:4px;padding:0 4px}
+.day{margin:16px 0 4px;color:var(--mut);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.item{padding:10px 0;border-top:1px solid var(--line)}.item:first-of-type{border-top:0}
+section[hidden]{display:none}
 </style></head><body>
-<header><h1>VoiceClone Studio</h1><div class="mut"><a href="/dashboard">Pipeline dashboard</a> · <a href="/architecture">Architecture</a> · <a href="/models">Models</a> ·<span id="gpu"></span></div></header>
+<header><h1>VoiceClone Studio</h1><div class="row"><span class="pill" id="state">idle</span><span class="mut" id="gpu"></span></div></header>
+<nav id="tabs">
+ <button data-tab="create">Create</button><button data-tab="voices">Voices</button><button data-tab="library">Library</button><button data-tab="system">System</button>
+</nav>
 
-<div class="card">
- <h2>1 · Speaker &amp; recording</h2>
- <div class="row" style="margin-bottom:10px"><label>Speaker name</label><input id="spk" value="me" style="max-width:200px">
-  <span class="mut">Quiet room · 10–15 cm from mic · speak naturally. Mic processing (echo cancel/noise suppress/AGC) is switched off for you.</span></div>
- <div id="parts"></div>
- <div class="row"><button class="pri" id="enrollBtn">Pick reference clip</button>
-  <span class="mut">Takes the best ~15 s sentence from Part A, untouched, and transcribes it.</span></div>
- <div id="enrollOut" style="margin-top:10px"></div>
-</div>
+<!-- ============================ CREATE ============================ -->
+<section id="tab-create" hidden>
+ <div class="card">
+  <h2>1 · Voice</h2>
+  <div class="row"><select id="voice"></select><select id="preset"><option value="">Preset…</option></select>
+   <span class="mut" id="voiceInfo"></span></div>
+  <div class="mut gap">Voices and their intonation clips are managed in the <a href="#voices">Voices</a> tab.</div>
+ </div>
 
-<div class="card">
- <h2>2 · Generate</h2>
- <textarea id="text" placeholder="Paste the text to speak…">I never thought I'd see this day. After years of waiting, the letter finally arrived. My hands were shaking as I opened it. But the news was not what I expected. They had turned us down. I sat there in silence, unable to speak.</textarea>
- <div class="row" style="margin:10px 0"><label class="mut">Engine
-  <select id="engine" style="background:#0b0d11;color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit">
-   <option value="voxcpm">VoxCPM2 · 48 kHz · style control</option><option value="qwen">Qwen3-TTS 1.7B · 24 kHz</option></select></label></div>
- <input id="style" placeholder="Direction, plain language, e.g. quiet, emotional documentary narrator" value="quiet, emotional documentary narrator">
- <div class="row" style="margin-top:10px"><button id="tagBtn">Tag with local LLM</button>
-  <span class="mut" id="tagMsg">The LLM reads your direction and writes a delivery instruction for each segment. You review it before anything is generated.</span></div>
- <div id="taggedBox" hidden style="margin-top:10px">
-  <div class="mut" style="margin-bottom:4px">Tagged script (editable). Each line is <code>(delivery instruction)text</code>; the instruction is performed, not spoken. A blank line = paragraph pause. This exact text is what gets generated.</div>
-  <textarea id="tagged" style="min-height:200px"></textarea></div>
- <div class="row" style="margin-top:10px"><button class="pri" id="genBtn">Generate</button>
-  <label class="mut">Denoise <input type="number" id="denoise" min="0" max="1" step="0.05" value="0"></label>
-  <label class="mut">Target LUFS <input type="number" id="lufs" value="-16" step="1"></label>
-  <span class="mut" id="genMsg"></span></div>
- <div class="stages" id="stages"></div>
- <div id="result" style="margin:12px 0"></div>
- <pre id="log"></pre>
-</div>
+ <div class="card">
+  <h2>2 · Script</h2>
+  <textarea id="text" placeholder="Paste the text to speak. For a timed voiceover, use lines like:   0:03.0 - 0:07.5   Text to say"></textarea>
+  <div class="row gap"><span class="mut" id="mode">Plain text</span><span class="mut">· add intonation:</span><span id="tagChips"></span></div>
+  <div class="mut" style="margin-top:4px">Put <code>@sad</code> (or another tag) anywhere in a line; it holds until the next tag or the end of the line. Without tags, <code>?</code> uses the question clip and <code>!</code> the excited clip.</div>
+  <div class="row gap"><input id="style" style="flex:1 1 320px" placeholder="Direction for the LLM, e.g. confident, warm product-film narrator" value="Confident, warm, human narrator. Clear and credible, never salesy.">
+   <button id="tagBtn">Direct with local LLM</button></div>
+  <div class="mut" id="tagMsg" style="margin-top:4px">The LLM reads the whole script and adds an <code>@tag</code> to each line (plus pauses for plain text). You review and edit it before anything is generated.</div>
+  <div id="taggedBox" hidden class="gap">
+   <div class="mut" style="margin-bottom:4px">Directed script (editable). This exact text is what gets generated.</div>
+   <textarea id="tagged" style="min-height:200px"></textarea>
+   <details style="margin-top:6px"><summary class="mut">What the director chose</summary><div class="scroll"><table id="dirTable"></table></div></details></div>
+ </div>
 
-<div class="card">
- <h2>3 · Recent outputs</h2>
- <div class="mut" style="margin-bottom:8px">Every finished job, newest first. Text shown is the start of the script that was generated.</div>
- <div id="library">loading…</div>
-</div>
+ <div class="card">
+  <h2>3 · Options &amp; generate</h2>
+  <div class="row"><label class="k">Engine <select id="engine"><option value="voxcpm">VoxCPM2 · 48 kHz</option><option value="qwen">Qwen3-TTS 1.7B · 24 kHz</option></select></label>
+   <label class="k"><input type="checkbox" id="multi"> Use intonation clips</label>
+   <label class="k">Looseness <input type="range" id="cfg" min="1" max="3" step="0.1" value="2"><b id="cfgv">2.0</b></label>
+   <span class="mut">lower = more varied delivery, higher = closer to the reference</span></div>
+  <div class="row gap"><label class="k"><input type="checkbox" id="master" checked> Master the audio</label>
+   <label class="k" id="masterOpts">Target LUFS <input type="number" id="lufs" value="-16" step="1"> Denoise <input type="number" id="denoise" min="0" max="1" step="0.05" value="0"></label>
+   <input id="title" style="flex:1 1 200px" placeholder="Name this render (optional)"></div>
+  <div class="row gap"><button class="pri" id="genBtn">Generate</button><span class="mut" id="genMsg"></span></div>
+  <div class="stages" id="stages"></div>
+  <div id="result" style="margin:12px 0"></div>
+  <pre id="log" hidden></pre>
+ </div>
+</section>
+
+<!-- ============================ VOICES ============================ -->
+<section id="tab-voices" hidden>
+ <div class="card">
+  <h2>1 · Speaker &amp; recording</h2>
+  <div class="row" style="margin-bottom:10px"><label>Speaker name</label><input id="spk" list="spkList" value="me" style="max-width:200px"><datalist id="spkList"></datalist>
+   <span class="mut">Quiet room · 10–15 cm from mic · speak naturally. Mic processing (echo cancel/noise suppress/AGC) is switched off for you.</span></div>
+  <div id="parts"></div>
+ </div>
+ <div class="card">
+  <h2>2 · Reference clip</h2>
+  <div class="row"><button class="pri" id="enrollBtn">Pick reference clip</button>
+   <span class="mut">Takes the best ~15 s sentence from Part A, untouched, and transcribes it. Used for plain generation.</span></div>
+  <div id="enrollOut" class="gap"></div>
+ </div>
+ <div class="card">
+  <h2>3 · Intonation clips</h2>
+  <div class="row"><button class="pri" id="refsBtn">Build intonation clips</button>
+   <span class="mut">One clip per intonation from your three parts (neutral, six emotions, question), packed into one <code>.vcref</code> file. Needs all three parts; takes about a minute.</span></div>
+  <div id="refsOut" class="gap"></div>
+ </div>
+</section>
+
+<!-- ============================ LIBRARY ============================ -->
+<section id="tab-library" hidden>
+ <div class="card">
+  <div class="row" style="margin-bottom:6px"><input id="q" placeholder="Filter by name, speaker, engine…" style="flex:1 1 240px">
+   <label class="k"><input type="checkbox" id="hideTests" checked> Hide test renders</label><span class="mut" id="libCount"></span></div>
+  <div class="mut">Everything in <code>output/</code>, newest first. Hiding only filters this list; no files are moved or deleted.</div>
+  <div id="library" class="gap">loading…</div>
+ </div>
+</section>
+
+<!-- ============================ SYSTEM ============================ -->
+<section id="tab-system" hidden>
+ <div class="card">
+  <h2>System check</h2>
+  <div class="row"><button class="pri" id="docBtn">Run checks</button><button id="docFixBtn">Run + fix</button>
+   <span class="mut" id="docMsg">Checks the environment, packages, GPU, models, disk, server and tunnel. “Fix” only creates folders and starts the server/tunnel; it never installs or deletes.</span></div>
+  <div id="docOut" class="gap"></div>
+ </div>
+ <div class="card">
+  <h2>More</h2>
+  <div class="row"><a href="/dashboard">Live pipeline dashboard</a><a href="/architecture">Architecture</a><a href="/models">Model internals</a></div>
+ </div>
+</section>
 
 <script>
 const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api=(p,o)=>fetch(p,o).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j});
+const post=(p,b)=>api(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const bust=u=>u+(u.includes('?')?'&':'?')+'t='+Date.now();
+const mmss=s=>Math.floor(s/60)+':'+String(Math.round(s%60)).padStart(2,'0');
+let VOICES=[],PRESETS={},TAGS=[];
+
+/* ---------- tabs ---------- */
+function show(tab){
+ if(!['create','voices','library','system'].includes(tab))tab='create';
+ for(const t of ['create','voices','library','system'])$('tab-'+t).hidden=t!==tab;
+ for(const b of document.querySelectorAll('#tabs button'))b.classList.toggle('on',b.dataset.tab===tab);
+ if(location.hash!=='#'+tab)history.replaceState(null,'','#'+tab);
+ if(tab==='library')loadLibrary();if(tab==='system')loadDoctor();
+}
+for(const b of document.querySelectorAll('#tabs button'))b.onclick=()=>show(b.dataset.tab);
+addEventListener('hashchange',()=>show(location.hash.slice(1)));
+
+/* ---------- shared data ---------- */
+async function loadVoices(){
+ VOICES=await api('/api/voices');
+ const ready=VOICES.filter(v=>v.enrolled),cur=$('voice').value;
+ $('voice').innerHTML=ready.length?ready.map(v=>`<option value="${esc(v.name)}">${esc(v.name)}</option>`).join(''):'<option value="">No voice yet: record one in Voices</option>';
+ if(cur&&ready.some(v=>v.name===cur))$('voice').value=cur;
+ $('spkList').innerHTML=VOICES.map(v=>`<option value="${esc(v.name)}">`).join('');
+ voiceChanged();
+}
+function voice(){return VOICES.find(v=>v.name===$('voice').value)}
+function voiceChanged(){
+ const v=voice();
+ $('voiceInfo').innerHTML=v?(`<span class="badge good">enrolled</span>`+(v.clips.length?`<span class="badge good">${v.clips.length} intonation clips</span>`:'<span class="badge warn">no intonation clips yet</span>')):'';
+ $('multi').disabled=!(v&&v.vcref_mb);if(!(v&&v.vcref_mb))$('multi').checked=false;
+ const tags=v&&v.clips.length?v.clips.map(c=>c.tag):TAGS;
+ $('tagChips').innerHTML=tags.map(t=>`<button class="badge chip" data-tag="${esc(t)}">@${esc(t)}</button>`).join('');
+ for(const c of $('tagChips').querySelectorAll('button'))c.onclick=()=>insertTag(c.dataset.tag);
+}
+$('voice').onchange=voiceChanged;
+function insertTag(t){
+ const ta=$('text'),i=ta.selectionStart,s=ta.value,pre=s.slice(0,i),sp=pre&&!/\s$/.test(pre)?' ':'';
+ ta.value=pre+sp+'@'+t+' '+s.slice(ta.selectionEnd);ta.focus();const p=(pre+sp+'@'+t+' ').length;ta.setSelectionRange(p,p);stale();detect();
+}
+async function loadPresets(){
+ const r=await api('/api/presets');PRESETS=r.presets;TAGS=r.tags;
+ $('preset').innerHTML='<option value="">Preset…</option>'+Object.keys(PRESETS).map(k=>`<option>${esc(k)}</option>`).join('');
+}
+$('preset').onchange=()=>{const p=PRESETS[$('preset').value];if(!p)return;
+ if(p.engine)$('engine').value=p.engine;if(p.style!==undefined&&p.style!=='')$('style').value=p.style.replace(/[()]/g,'');
+ if(p.lufs!==undefined)$('lufs').value=p.lufs;if(p.denoise!==undefined)$('denoise').value=p.denoise};
+
+/* ---------- create ---------- */
+const TIMED=/^\s*\d+:\d{1,2}(?:\.\d+)?\s*-\s*\d+:\d{1,2}(?:\.\d+)?\s+\S/;
+function detect(){
+ const lines=$('text').value.split('\n').filter(l=>TIMED.test(l));
+ $('mode').textContent=lines.length>=2?`Timed script · ${lines.length} lines · each fitted to its time slot`:'Plain text';
+}
+let taggedLive=false;
+const stale=()=>{$('taggedBox').hidden=true;$('tagged').value='';taggedLive=false};
+$('text').addEventListener('input',()=>{stale();detect()});$('style').addEventListener('input',stale);
+$('cfg').oninput=()=>$('cfgv').textContent=(+$('cfg').value).toFixed(1);
+$('master').onchange=()=>{$('masterOpts').style.opacity=$('master').checked?1:.4;$('lufs').disabled=$('denoise').disabled=!$('master').checked};
+$('engine').onchange=()=>{const q=$('engine').value==='qwen';if(q)$('multi').checked=false;$('multi').disabled=q||!(voice()&&voice().vcref_mb);$('tagBtn').disabled=q};
+
+$('tagBtn').onclick=async()=>{
+ if(!$('text').value.trim()){$('tagMsg').textContent='Paste a script first.';return}
+ $('tagBtn').disabled=true;$('tagMsg').textContent='Directing… loading the LLM (about a minute the first time)';
+ try{const r=await post('/api/tag',{text:$('text').value,style:$('style').value,speaker:$('voice').value||'me'});
+  const t0=Date.now();
+  const iv=setInterval(async()=>{try{const j=await api('/api/tag?id='+r.id);
+   if(j.state==='running'){$('tagMsg').textContent='Directing… '+Math.round((Date.now()-t0)/1000)+'s';return}
+   clearInterval(iv);$('tagBtn').disabled=false;
+   if(j.state==='error'){$('tagMsg').textContent='Directing failed: '+j.error;return}
+   $('tagged').value=j.tagged;$('taggedBox').hidden=false;taggedLive=true;
+   $('dirTable').innerHTML='<tr><th>Tag</th><th>Form</th><th>Pitch</th><th>Job of the line</th><th>Stress</th><th>Line</th></tr>'+j.lines.map(l=>`<tr><td><span class="badge">${esc(l.tag)}</span></td><td>${esc(l.form)}</td><td>${esc(l.contour)}</td><td>${esc(l.function)}</td><td>${esc((l.stress||[]).join(', '))}</td><td>${esc(l.text)}</td></tr>`).join('');
+   if(voice()&&voice().vcref_mb)$('multi').checked=true;
+   $('tagMsg').textContent='Review and edit the directed script below, then Generate.'+(j.fallback_chunks?` (${j.fallback_chunks} chunk(s) fell back to punctuation rules.)`:'')+(j.fixes&&j.fixes.length?` ${j.fixes.length} automatic fix(es) applied.`:'');
+  }catch(e){}},2000);
+ }catch(e){$('tagBtn').disabled=false;$('tagMsg').textContent=e.message}
+};
+
+let poll=null;
+$('genBtn').onclick=async()=>{
+ $('genMsg').textContent='';$('result').innerHTML='';
+ const text=taggedLive&&$('tagged').value.trim()?$('tagged').value:$('text').value;
+ if(!$('voice').value){$('genMsg').textContent='Pick a voice first (Voices tab).';return}
+ if(!text.trim()){$('genMsg').textContent='Paste a script first.';return}
+ try{const r=await post('/api/generate',{speaker:$('voice').value,text,engine:$('engine').value,style:taggedLive?$('style').value:'',multi:$('multi').checked,
+   cfg:+$('cfg').value===2?null:+$('cfg').value,master:$('master').checked,denoise:+$('denoise').value,lufs:+$('lufs').value,title:$('title').value});
+  $('genBtn').disabled=true;$('log').hidden=false;watch(r.job);
+ }catch(e){$('genMsg').textContent=e.message}
+};
+function watch(id){
+ clearInterval(poll);
+ poll=setInterval(async()=>{
+  try{const [s,j]=await Promise.all([api('/api/status'),api('/api/job?id='+id)]);
+   $('stages').innerHTML=(s.pipeline.stages||[]).map(x=>`<div class="st ${x.state}"><b>${esc(x.name)}</b><small>${esc(x.state)}${x.detail?' · '+esc(x.detail):''}</small></div>`).join('');
+   const l=$('log');l.textContent=s.log.slice(-8).join('\n');l.scrollTop=l.scrollHeight;
+   const syn=(s.pipeline.stages||[]).find(x=>x.name==='Synthesize');
+   if(syn&&syn.state==='done'&&!$('rawEarly')&&j.state==='running'){$('result').innerHTML=`<div class="mut">Voice is ready (finishing…)</div><audio id="rawEarly" controls src="${bust('/files/work/jobs/'+id+'/raw.wav')}"></audio>`}
+   if(j.state==='done'||j.state==='error'){clearInterval(poll);$('genBtn').disabled=false;showResult(j)}
+  }catch(e){}
+ },1500);
+}
+function showResult(j){
+ if(j.state==='error'){$('result').innerHTML=`<span class="badge bad">failed: ${esc(j.error||'see the log')}</span>`;return}
+ const m=j.master||{},t=j.timings||{},o=j.options||{},raw=o.master===false;
+ const src=f=>bust('/files/work/jobs/'+j.job+'/'+f+'.wav');
+ $('result').innerHTML=(raw?`<div class="mut">Raw output (not mastered)</div><audio controls src="${src('raw')}"></audio>`
+  :`<div class="cols"><div><div class="mut">Mastered</div><audio controls src="${src('master')}"></audio></div><div><div class="mut">Raw TTS (before mastering)</div><audio controls src="${src('raw')}"></audio></div></div>`)+
+  `<div style="margin:8px 0"><span class="badge good">${esc(j.engine||'')}</span>${o.multi?'<span class="badge">intonation clips</span>':''}${o.timed?'<span class="badge">timed</span>':''}${j.style?`<span class="badge">style: ${esc(j.style)}</span>`:''}
+  ${m.lufs!==undefined?`<span class="badge">${m.lufs} LUFS</span><span class="badge">${m.true_peak_db} dBTP</span>`:''}<span class="badge">synth ${t.synth}s</span>${t.master?`<span class="badge">master ${t.master}s</span>`:''}
+  <a href="#library">Open in Library</a></div>`;
+ setTimeout(()=>$('result').scrollIntoView({behavior:'smooth',block:'nearest'}),100);
+}
+api('/api/job').then(j=>{if(j.state==='running'){$('genBtn').disabled=true;$('log').hidden=false;watch(j.job)}}).catch(()=>{});
+
+/* ---------- voices: recorder ---------- */
 const SCRIPT={
 A:{title:'Part A · Neutral narration (~60 s)',text:`The big brown fox jumped quickly over the fence, then paused beside a quiet stream.
 Thirty-three thieves thought they thrilled the throne throughout Thursday.
@@ -89,10 +267,6 @@ B:{title:'Part B · Expressive (~35 s) — commit to each emotion',text:`(Excite
 (Playful, teasing) "Oh, you think you're so clever, don't you? Well, we'll just see about that."`},
 C:{title:'Part C · Short utterances (~15 s) — pause ~1 s between',text:`Yes. / No. / Maybe. / Right. / Okay, sure. / Hmm, let me think. / Really? / What do you mean? / Wait, hold on. / Thank you so much. / Ha, that's great. / Ahh, finally.`}};
 const spk=()=>$('spk').value.trim().toLowerCase();
-const api=(p,o)=>fetch(p,o).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j});
-const bust=u=>u+(u.includes('?')?'&':'?')+'t='+Date.now();
-
-/* ---------- recorder ---------- */
 const WK=`class R extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('rec',R)`;
 let rec=null;
 async function startRec(p){
@@ -125,85 +299,89 @@ async function upload(p,blob){
   add('noise floor '+st.noise_floor_db+' dB',st.noise_floor_db>-45?'bad':st.noise_floor_db>-55?'warn':'good');
   add('SNR '+st.snr_db+' dB',st.snr_db<30?'warn':'good');add('speech '+st.speech_sec+' s','');if(st.clip_pct>0)add('CLIPPING','bad');
   $('s'+p).innerHTML=b.join('')+'<span class="badge good">saved ✓</span>';
- }catch(e){$('s'+p).innerHTML=`<span class="badge bad">${e.message}</span>`}
+ }catch(e){$('s'+p).innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}
 }
-$('parts').innerHTML=Object.entries(SCRIPT).map(([p,s])=>`<div class="part"><b>${s.title}</b><div class="script">${s.text.replace(/</g,'&lt;')}</div>
+$('parts').innerHTML=Object.entries(SCRIPT).map(([p,s])=>`<div class="part"><b>${s.title}</b><div class="script">${esc(s.text)}</div>
  <div class="row"><button id="rb${p}">● Record</button><div class="meter"><i id="m${p}"></i></div><span class="mut" id="t${p}"></span>
- <label class="mut">or <input type="file" accept="audio/*" id="f${p}" style="width:auto;padding:4px"></label></div>
+ <label class="k">or <input type="file" accept="audio/*" id="f${p}" style="width:auto;padding:4px"></label></div>
  <div id="s${p}" style="margin-top:6px"></div><audio id="a${p}" controls hidden></audio></div>`).join('');
 for(const p of Object.keys(SCRIPT)){
- $('rb'+p).onclick=async()=>{try{rec?(rec.p===p?await stopRec():alert('Stop the other recording first')):await startRec(p)}catch(e){$('s'+p).innerHTML=`<span class="badge bad">${e.message}</span>`}};
+ $('rb'+p).onclick=async()=>{try{rec?(rec.p===p?await stopRec():alert('Stop the other recording first')):await startRec(p)}catch(e){$('s'+p).innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}};
  $('f'+p).onchange=e=>e.target.files[0]&&upload(p,e.target.files[0]);
 }
 
-/* ---------- enroll ---------- */
+/* ---------- voices: enroll + intonation clips ---------- */
 $('enrollBtn').onclick=async()=>{
- $('enrollBtn').disabled=true;$('enrollOut').innerHTML='<span class="mut">Cleaning and building profile…</span>';
+ $('enrollBtn').disabled=true;$('enrollOut').innerHTML='<span class="mut">Picking the clip and transcribing…</span>';
  try{const r=await api(`/api/enroll?speaker=${encodeURIComponent(spk())}`,{method:'POST'});const s=spk();
-  $('enrollOut').innerHTML=`<span class="badge good">reference ready</span><span class="badge">${r.seconds} s from part ${r.source}</span>
+  $('enrollOut').innerHTML=`<span class="badge good">reference ready</span><span class="badge">${r.seconds} s from part ${esc(r.source)}</span>
   <audio controls src="${bust('/files/reference/'+s+'/ref.wav')}"></audio>
-  <div class="mut" style="margin-top:6px">Transcript the model will use (must match what you said):</div><div class="script">${r.transcript.replace(/</g,'&lt;')}</div>`;
- }catch(e){$('enrollOut').innerHTML=`<span class="badge bad">${e.message}</span>`}
+  <div class="mut" style="margin-top:6px">Transcript the model will use (must match what you said):</div><div class="script">${esc(r.transcript)}</div>`;
+  loadVoices();
+ }catch(e){$('enrollOut').innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}
  $('enrollBtn').disabled=false;
 };
-
-/* ---------- generate ---------- */
-let poll=null;
-const stale=()=>{$('taggedBox').hidden=true;$('tagged').value=''};
-$('text').addEventListener('input',stale);$('style').addEventListener('input',stale);
-$('tagBtn').onclick=async()=>{
- if($('engine').value!=='voxcpm'){$('tagMsg').textContent='Tagging is for VoxCPM2 (Qwen3-TTS Base has no delivery control).';return}
- $('tagBtn').disabled=true;$('tagMsg').textContent='Tagging… loading the LLM (~1 min the first time)';
- try{const r=await api('/api/tag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('text').value,style:$('style').value})});
-  const t0=Date.now();
-  const iv=setInterval(async()=>{try{const j=await api('/api/tag?id='+r.id);
-   if(j.state==='running'){$('tagMsg').textContent='Tagging… '+Math.round((Date.now()-t0)/1000)+'s';return}
-   clearInterval(iv);$('tagBtn').disabled=false;
-   if(j.state==='error'){$('tagMsg').textContent='Tagging failed: '+j.error;return}
-   $('tagged').value=j.tagged;$('taggedBox').hidden=false;
-   $('tagMsg').textContent='Review and edit the tagged script below, then Generate.'+(j.fallback_chunks?' ('+j.fallback_chunks+' chunk(s) fell back to the plain direction.)':'');
-  }catch(e){}},2000);
- }catch(e){$('tagBtn').disabled=false;$('tagMsg').textContent=e.message}
-};
-$('genBtn').onclick=async()=>{
- $('genMsg').textContent='';$('result').innerHTML='';
- const tagged=!$('taggedBox').hidden&&$('tagged').value.trim();
- if($('engine').value==='voxcpm'&&$('style').value.trim()&&!tagged){$('genMsg').textContent='Tag the script first so you can review it (or clear the direction to generate plain).';return}
- try{const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speaker:spk(),text:tagged?$('tagged').value:$('text').value,engine:$('engine').value,style:$('style').value,denoise:+$('denoise').value,lufs:+$('lufs').value})});
-  $('genBtn').disabled=true;watch(r.job);
- }catch(e){$('genMsg').textContent=e.message}
-};
-function watch(id){
- clearInterval(poll);
- poll=setInterval(async()=>{
-  try{const [s,j]=await Promise.all([api('/api/status'),api('/api/job?id='+id)]);
-   $('stages').innerHTML=(s.pipeline.stages||[]).map(x=>`<div class="st ${x.state}"><b>${x.name}</b><small>${x.state}${x.detail?' · '+x.detail:''}</small></div>`).join('');
-   const l=$('log');l.textContent=s.log.slice(-8).join('\n');l.scrollTop=l.scrollHeight;
-   const syn=(s.pipeline.stages||[]).find(x=>x.name==='Synthesize');
-   if(syn&&syn.state==='done'&&!$('rawEarly')&&j.state==='running'){$('result').innerHTML=`<div class="mut">Voice is ready (mastering in progress…)</div><audio id="rawEarly" controls src="${bust('/files/work/jobs/'+id+'/raw.wav')}"></audio>`}
-   if(j.state==='done'||j.state==='error'){clearInterval(poll);$('genBtn').disabled=false;show(j)}
-  }catch(e){}
- },1500);
+function clipTable(v){
+ if(!v||!v.clips.length)return '<span class="mut">No intonation clips for this speaker yet.</span>';
+ return `<span class="badge good">${v.clips.length} clips</span>${v.vcref_mb?`<span class="badge">voices/${esc(v.name)}.vcref · ${v.vcref_mb} MB</span>`:''}
+ <div class="scroll"><table><tr><th>Tag</th><th>Intonation</th><th>Length</th><th>Transcript</th><th>Listen</th></tr>`+
+ v.clips.map(c=>`<tr><td><span class="badge">@${esc(c.tag)}</span></td><td>${esc(c.label)}</td><td>${c.seconds} s</td><td>${esc(c.text)}</td><td><audio controls preload="none" style="width:220px" src="${bust('/files/reference/'+v.name+'/refs/'+c.tag+'.wav')}"></audio></td></tr>`).join('')+'</table></div>';
 }
-function show(j){
- if(j.state==='error'){$('result').innerHTML=`<span class="badge bad">failed: ${j.error||''}</span>`;return}
- setTimeout(()=>$('result').scrollIntoView({behavior:'smooth',block:'start'}),100);
- const m=j.master||{},t=j.timings||{};
- $('result').innerHTML=`<div class="cols"><div><div class="mut">Mastered</div><audio controls src="${bust('/files/work/jobs/'+j.job+'/master.wav')}"></audio></div>
- <div><div class="mut">Raw TTS (before mastering)</div><audio controls src="${bust('/files/work/jobs/'+j.job+'/raw.wav')}"></audio></div></div>
- <div style="margin:8px 0"><span class="badge good">${j.engine||''}</span>${j.style?`<span class="badge">style: ${j.style.replace(/</g,'&lt;')}</span>`:''}<span class="badge">${m.lufs} LUFS</span><span class="badge">${m.true_peak_db} dBTP</span><span class="badge">${m.gain_reduction_db} dB avg GR</span><span class="badge">${m.sample_rate} Hz</span>
- <span class="badge">synth ${t.synth}s</span><span class="badge">master ${t.master}s</span></div>
- `;
-}
-/* resume view of a running/last job after page reload */
-api('/api/job').then(j=>{if(j.state==='running'){$('genBtn').disabled=true;watch(j.job)}else if(j.state==='done')show(j)}).catch(()=>{});
-setInterval(()=>api('/api/status').then(s=>{const g=s.gpu||{};if(g.util!==undefined)$('gpu').textContent=`GPU ${g.util}% · VRAM ${g.vram_used_gb}/${g.vram_total_gb} GB`}).catch(()=>{}),3000);
+$('refsBtn').onclick=async()=>{
+ $('refsBtn').disabled=true;$('refsOut').innerHTML='<span class="mut">Building clips (transcribing parts A, B and C with Whisper)…</span>';
+ try{const v=await api(`/api/refs?speaker=${encodeURIComponent(spk())}`,{method:'POST'});$('refsOut').innerHTML=clipTable(v);loadVoices();
+ }catch(e){$('refsOut').innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}
+ $('refsBtn').disabled=false;
+};
+$('spk').addEventListener('change',()=>{const v=VOICES.find(x=>x.name===spk());$('refsOut').innerHTML=v&&v.clips.length?clipTable(v):''});
 
+/* ---------- library ---------- */
+let OUTS=[];
 async function loadLibrary(){
- try{const L=await api('/api/jobs');
-  $('library').innerHTML=L.length?L.map(j=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><b>${j.job}</b> <span class="badge">${(j.speaker||'')}</span><span class="badge">${(j.engine||'')}</span>${j.master?`<span class="badge">${j.master.lufs} LUFS</span>`:''}
-   <div class="mut" style="margin:4px 0">${(j.text||'').replace(/</g,'&lt;')}</div><audio controls preload="none" style="width:100%" src="${bust('/files/work/jobs/'+j.job+'/master.wav')}"></audio></div>`).join(''):'No finished jobs yet.';
- }catch(e){$('library').textContent='could not load: '+e.message}
+ try{OUTS=await api('/api/outputs');renderLibrary()}catch(e){$('library').textContent='could not load: '+e.message}
 }
-loadLibrary();setInterval(loadLibrary,20000);
+function renderLibrary(){
+ const q=$('q').value.trim().toLowerCase(),hide=$('hideTests').checked;
+ const rows=OUTS.filter(o=>!(hide&&o.test)&&(!q||[o.title,o.file,o.speaker,o.engine,o.style].join(' ').toLowerCase().includes(q)));
+ $('libCount').textContent=rows.length+' of '+OUTS.length;
+ let day='',html='';
+ for(const o of rows){
+  const d=new Date(o.mtime*1000),ds=d.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+  if(ds!==day){day=ds;html+=`<div class="day">${esc(ds)}</div>`}
+  html+=`<div class="item"><div class="row"><b>${esc(o.title)}</b><span class="mut">${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span></div>
+  <div>${o.speaker?`<span class="badge">${esc(o.speaker)}</span>`:''}${o.engine?`<span class="badge">${esc(o.engine)}</span>`:''}
+  <span class="badge ${o.raw?'warn':'good'}">${o.raw?'raw':'mastered'}</span>${o.multi?'<span class="badge">intonation clips</span>':''}${o.timed?'<span class="badge">timed</span>':''}
+  ${o.cfg?`<span class="badge">looseness ${o.cfg}</span>`:''}${o.lufs!==undefined&&o.lufs!==null?`<span class="badge">${o.lufs} LUFS</span>`:''}
+  <span class="badge">${o.seconds?mmss(o.seconds):'?'}</span><span class="badge">${o.mb} MB</span>${o.sr?`<span class="badge">${o.sr/1000} kHz</span>`:''}
+  <a href="/files/output/${encodeURIComponent(o.file)}?dl=1" style="margin-left:6px">download</a></div>
+  <audio controls preload="none" src="/files/output/${encodeURIComponent(o.file)}"></audio></div>`;
+ }
+ $('library').innerHTML=html||'<span class="mut">Nothing matches.</span>';
+}
+$('q').oninput=renderLibrary;$('hideTests').onchange=renderLibrary;
+
+/* ---------- system ---------- */
+function renderDoctor(d){
+ if(!d||!d.checks||!d.checks.length){$('docOut').innerHTML='<span class="mut">No report yet. Run checks.</span>';return}
+ $('docOut').innerHTML=`<div><span class="badge ${d.ok?'good':'bad'}">${d.ok?'healthy':'needs attention'}</span><span class="mut">checked ${new Date(d.checked*1000).toLocaleString()}</span></div>
+ <div class="scroll"><table>`+d.checks.map(c=>`<tr><td style="width:24px;color:var(--${c.ok?'ok':'err'})">${c.ok?'✔':'✖'}</td><td>${esc(c.label)}</td><td class="mut">${c.ok?esc((c.detail||'').slice(0,70)):'fix: '+esc(c.fix)}</td></tr>`).join('')+'</table></div>';
+}
+async function loadDoctor(){try{renderDoctor(await api('/api/doctor'))}catch(e){}}
+async function runDoctor(fix){
+ $('docBtn').disabled=$('docFixBtn').disabled=true;$('docMsg').textContent=(fix?'Running checks and fixing':'Running checks')+'… (the GPU check takes a few seconds)';
+ try{renderDoctor(await api('/api/doctor?fix='+(fix?1:0),{method:'POST'}));$('docMsg').textContent=''}catch(e){$('docMsg').textContent='failed: '+e.message}
+ $('docBtn').disabled=$('docFixBtn').disabled=false;
+}
+$('docBtn').onclick=()=>runDoctor(false);$('docFixBtn').onclick=()=>runDoctor(true);
+
+/* ---------- status pill ---------- */
+setInterval(()=>api('/api/status').then(s=>{
+ const run=(s.pipeline.stages||[]).some(x=>x.state==='running');
+ $('state').textContent=run?'working · '+(s.pipeline.job||''):'idle';$('state').classList.toggle('busy',run);
+ const g=s.gpu||{};$('gpu').textContent=g.util!==undefined?`GPU ${g.util}% · VRAM ${g.vram_used_gb}/${g.vram_total_gb} GB`:''}).catch(()=>{}),3000);
+
+/* ---------- init ---------- */
+(async()=>{await Promise.all([loadPresets().catch(()=>{}),loadVoices().catch(()=>{})]);voiceChanged();detect();$('master').onchange();
+ const v=VOICES.find(x=>x.name===spk());if(v&&v.clips.length)$('refsOut').innerHTML=clipTable(v);
+ show(location.hash.slice(1))})();
 </script></body></html>

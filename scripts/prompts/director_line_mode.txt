@@ -1,0 +1,2 @@
+LINE MODE
+The text to tag is a numbered list, one script line per number. Return exactly one item per numbered line, in order. Each item's "text" is that line exactly as given, without its number. Never merge or split lines. Set "break" to false. A line can be a fragment of a longer sentence: judge its form and contour from the whole sentence it belongs to (see the FULL SCRIPT), and give every fragment of one sentence the same tag.

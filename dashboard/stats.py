@@ -1,13 +1,11 @@
-"""Read-only dashboard server. Binds to localhost only; cloudflared tunnels to it.
-Run: python server.py   (serves http://127.0.0.1:8787)
-"""
+"""Live numbers for the pipeline dashboard: GPU / RAM, pipeline status and log, installed models, outputs, skill progress and
+the last doctor report. Used by app_server.py (snapshot() for /api/status, gpu_loop() in a thread)."""
 import ctypes
 import json
-import sys
 import subprocess
-import threading
+import sys
+import threading  # noqa: F401  (gpu_loop is started by the caller)
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,12 +15,12 @@ PORT = 8787
 VRAM_TOTAL_GB = 16.0  # RX 6900 XT (Windows only; macOS has unified memory)
 
 MODELS = [
-    # name, role, approx params, approx weights on disk (GB), est. min VRAM (GB), dir
-    ("IndexTTS-2.5 (GPT + S2Mel DiT + codec + BigVGAN)", "Voice-cloning TTS", "~1-2B total (est.)", 5.1, 6.3, ROOT / "models/index-tts/checkpoints"),
-    ("Qwen3-4B-Instruct-2507", "Emotion/pace tagger LLM", "4.0B", 7.5, 8.3, ROOT / "models/qwen3-4b-instruct"),
-    ("Qwen 0.6B emo (bundled)", "Text-emotion helper (optional)", "0.6B", 1.2, 2, None),
-    ("w2v-BERT 2.0 (auto-fetched)", "Speaker/semantic features", "~0.6B", 2.3, 2, None),
-    ("Enhancer (TBD)", "Reference cleanup", "<0.1B", 0.1, 1, None),
+    # name, role, params (read from the weight files, see /models), approx peak VRAM in GB (None = not measured), folder
+    ("VoxCPM2", "Default TTS engine, 48 kHz", "2.38B", 6.7, ROOT / "models/voxcpm2"),
+    ("Qwen3-TTS 1.7B Base", "Alternative TTS engine, 24 kHz", "2.10B", None, ROOT / "models/qwen3-tts-1.7b-base"),
+    ("Qwen3-TTS Tokenizer 12Hz", "Speech codec for Qwen3-TTS", "-", None, ROOT / "models/qwen3-tts-tokenizer"),
+    ("Whisper small", "Reference transcription and clip picking", "0.24B", None, ROOT / "models/whisper"),
+    ("Qwen3-4B-Instruct-2507", "Director LLM (intonation tags)", "4.0B", None, ROOT / "models/qwen3-4b-instruct"),
 ]
 
 state = {"gpu": {}, "t": 0}
@@ -70,40 +68,26 @@ def gpu_loop():
         time.sleep(2)
 
 
-def snapshot():
+def _json(p, default=None):
     try:
-        st = json.loads(STATUS.read_text(encoding="utf-8"))
+        return json.loads(Path(p).read_text(encoding="utf-8"))
     except Exception:
-        st = {"job": None, "stages": []}
+        return default
+
+
+def snapshot():
+    st = _json(STATUS, {"job": None, "stages": []})
     try:
         log = LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
     except Exception:
         log = []
-    models = [{"name": n, "role": r, "params": p, "disk_gb": g, "min_vram": v,
-               "downloaded_gb": dir_gb(d) if d else None} for n, r, p, g, v, d in MODELS]
+    models = [{"name": n, "role": r, "params": p, "peak_vram": v,
+               "disk_gb": dir_gb(d) if Path(d).exists() else None} for n, r, p, v, d in MODELS]
     outs = sorted((ROOT / "output").glob("*.wav"), key=lambda f: f.stat().st_mtime, reverse=True)[:8]
+    skill = _json(ROOT / "work" / "skill_progress.json")
+    doc = _json(ROOT / "work" / "doctor.json")
     return {"time": time.strftime("%H:%M:%S"), "gpu": state["gpu"], "ram": ram(), "pipeline": st,
-            "models": models, "log": log,
+            "models": models, "log": log, "skill": skill,
+            "doctor": ({"ok": doc["ok"], "checked": doc["checked"], "failing": [c["label"] for c in doc["checks"] if not c["ok"]]}
+                       if doc else None),
             "outputs": [{"name": f.name, "mb": round(f.stat().st_size / 1e6, 1)} for f in outs]}
-
-
-class H(BaseHTTPRequestHandler):
-    def log_message(self, *a): pass
-
-    def do_GET(self):
-        if self.path.startswith("/api/status"):
-            body, ct = json.dumps(snapshot()).encode(), "application/json"
-        elif self.path in ("/", "/index.html"):
-            body, ct = (Path(__file__).parent / "index.html").read_bytes(), "text/html; charset=utf-8"
-        else:
-            self.send_error(404); return
-        self.send_response(200)
-        self.send_header("Content-Type", ct); self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body))); self.end_headers()
-        self.wfile.write(body)
-
-
-if __name__ == "__main__":
-    threading.Thread(target=gpu_loop, daemon=True).start()
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
-

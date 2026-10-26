@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ (tagger)
 from tagger import Tagger, split_chunks, _norm  # noqa: E402
 
 SYSTEM = """You are a voice director for VoxCPM2, a voice-cloning text-to-speech model.

@@ -23,6 +23,8 @@ Run `VC profile list`. Ask: reuse a profile, register an existing speaker folder
 ## Phase 3 — Enroll
 `VC enroll <name>`. Skips automatically if `ref.wav`/`ref.txt` exist (reuse). Use `--force` only if the user asks to re-pick the reference clip. Show the user `ref_text` (`profile show`) and ask them to confirm it matches what is said.
 
+For varied intonation also run `VC refs <name>` (builds one clip per emotion from recorded Parts A/B/C and packs `voices\<speaker>.vcref`; needs all three parts for the full set). Use `--multi` in Phase 6. See Phase 5 for tags.
+
 ## Phase 4 — Config (input: engine, style, loudness)
 Offer presets (`narration`, `conversational`, `ad-read`, `qwen-plain`) or custom values:
 - `engine`: `voxcpm` (48 kHz, supports style prefix like `(warm, slow)`) or `qwen` (24 kHz, no style control).
@@ -30,10 +32,10 @@ Offer presets (`narration`, `conversational`, `ad-read`, `qwen-plain`) or custom
 Persist with `VC profile set <name> --preset P --engine E --style S --lufs N --denoise D`. One-off overrides can go straight on `generate`.
 
 ## Phase 5 — Script (input: the text)
-Get the text from the user (paste or file). Write it UTF-8 to `work\jobs\_input\<job>.txt` (create the folder). Split into paragraphs; with VoxCPM a leading `(style)` on a line overrides delivery for that line. Warn about digits/abbreviations: spell them out. Then `VC progress set 5 done "<n> words"`.
+Get the text from the user (paste or file). Write it UTF-8 to `work\jobs\_input\<job>.txt` (create the folder). Split into paragraphs; with VoxCPM a leading `(style)` on a line overrides delivery for that line. Warn about digits/abbreviations: spell them out. With `--multi`, text is split by regex into takes that each use an intonation clip (`neutral excited warm serious sad annoyed playful question`): force one with `@sad` anywhere in a line (holds to the next `@tag` or line end); otherwise `?` uses `question`, `!` uses `excited`, the rest `neutral`. Offer to tag lines if the user wants more expression. Then `VC progress set 5 done "<n> words"`.
 
 ## Phase 6 — Generate
-Pick a job id like `<name>_<topic>_<YYYYMMDD-HHMM>`. `VC generate <name> --text-file <file> --job <id> [--engine ..] [--style ..] [--lufs ..]`. It runs synthesis then mastering (long runs: use background execution and poll `VC progress show`; live stage detail is in `work\status.json` and `work\pipeline.log`). Output: `output\<id>.wav` (24-bit 48 kHz).
+Pick a job id like `<name>_<topic>_<YYYYMMDD-HHMM>`. `VC generate <name> --text-file <file> --job <id> [--engine ..] [--style ..] [--lufs ..] [--multi [--stack]] [--timed] [--cfg 1.5] [--no-master]` (`--timed`: script lines are `m:ss.s - m:ss.s  text`, each fitted to its slot; `--cfg` lower = more varied delivery; `--no-master` = raw output). It runs synthesis then mastering (long runs: use background execution and poll `VC progress show`; live stage detail is in `work\status.json` and `work\pipeline.log`). Output: `output\<id>.wav` (24-bit 48 kHz).
 
 ## Phase 7 — Review
 Report output path, LUFS/true peak from `work\jobs\<id>\meta.json`, and the Studio link. Ask whether to adjust (→ Phase 4 with `profile set`, regenerate with a new job id) or finish. Then `VC progress set 7 done`.

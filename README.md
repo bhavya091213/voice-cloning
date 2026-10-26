@@ -11,7 +11,7 @@ Built and tested on Windows 11 with an AMD RX 6900 XT (ROCm PyTorch); macOS Appl
 | Install and set it up | [Setup](#setup) · [Windows](#windows-amd-rocm) · [macOS](#macos-apple-silicon) · [Check dependencies](#check-dependencies-doctor) |
 | Generate speech now | [Quick start](#quick-start) · [CLI](#command-line) |
 | Use the browser UI or phone | [Web UI](#web-ui) · [Remote access](#remote-access) |
-| Reuse a voice and settings | [Profiles and presets](#profiles-and-presets) |
+| Reuse a voice and settings | [Profiles and presets](#profiles-and-presets) · [Varied intonation / .vcref](#varied-intonation-one-voice-many-reference-clips) |
 | Let an agent drive it | [Agent skills](#agent-skills) · [Claude mod](#claude-mod-progress-playback-doctor) |
 | Find a file or script | [Repository layout](#repository-layout) |
 | Fix a problem | [Known issues](#known-issues) · [Legacy / unused](#legacy--unused) |
@@ -113,10 +113,17 @@ Options: `--engine qwen|voxcpm`, `--style`, `--denoise 0-1`, `--lufs -16`. Outpu
 
 | Route | Page |
 |---|---|
-| `/` | Studio: record, enroll, generate, play results |
-| `/dashboard` | Live GPU/RAM/stage/log view |
+| `/` | Studio, four tabs (below) |
+| `/dashboard` | Live GPU/RAM, pipeline stages, skill-run progress, doctor summary, models, log |
 | `/architecture` | Pipeline Mermaid diagram |
 | `/models` | Internals of Qwen3-TTS and VoxCPM2 |
+
+Studio tabs:
+
+- **Create**: pick a voice (and a preset), paste a script (plain text or a timed `m:ss - m:ss  text` script), optionally *Direct with local LLM* to add `@tag` intonation markers you can edit, set engine / looseness (`cfg`) / mastering, name the render, generate.
+- **Voices**: record or upload Parts A/B/C, pick the reference clip, build the per-intonation clips (`.vcref`) and listen to each one.
+- **Library**: every file in `output/`, grouped by day, with raw/mastered, timed and intonation badges, LUFS, length, playback and download. Search box and a *Hide test renders* filter (names containing test, regress or demo); nothing is moved or deleted.
+- **System**: the dependency doctor (run, or run + fix) with a fix hint for each failure.
 
 Access is protected by a key in `dashboard/token.txt` (auto-generated on first run, git-ignored). After editing `app_server.py`, restart it.
 
@@ -152,6 +159,52 @@ scripts\vc.py generate <name> --text-file t.txt --job <id>           # uses the 
 ```
 
 Run these with `.venv\Scripts\python.exe`. A fresh clone needs your own audio: `reference/` is not in git. A script to read while recording is in [`docs/recording_script.md`](docs/recording_script.md).
+
+### Varied intonation: one voice, many reference clips
+
+The three enrollment recordings already contain several intonations (A neutral, B six acted emotions, C questions). Build one clip per intonation and pack them into a single `.vcref` file:
+
+```
+scripts\vc.py refs <name> [--parts]      # -> reference/<speaker>/refs/*.wav and voices/<speaker>.vcref
+scripts\vc.py generate <name> --text-file t.txt --job <id> --multi
+```
+
+Add `--stack` to anchor every take on the whole neutral recording: the prompt becomes Part A followed by the tag's clip (Part B emotion, or Part C for questions), with both transcripts. The voice stays tied to the long neutral clip and the tag's clip, which comes last, carries the delivery. Prompts are longer, so rendering is a little slower. `--title` names the job in the Studio library.
+
+Clips built: `neutral` (A), `excited`, `warm`, `serious`, `sad`, `annoyed`, `playful` (B), `question` (C). Each take of your text is spoken with the clip its tag picks, then the takes are joined back in order. The text is split with plain regex ([`scripts/takes.py`](scripts/takes.py)); a tag is chosen by, first match wins:
+
+1. a marker in the text: `@sad I miss how things used to be.` It holds until the next marker or the end of the line: `Fine. @playful Oh, you think so? @serious Listen.`
+2. rules stored in the bundle (regex to tag; put a `rules.json` list of `{"pattern", "tag"}` in `refs/` before packing)
+3. built-in punctuation: a sentence ending in `?` uses `question`, one ending in `!` uses `excited`
+4. otherwise `neutral`
+
+A tag the voice does not have falls back to `neutral`. Works with `--timed` scripts too (each line is split into takes, then fitted to its slot). VoxCPM2 only.
+
+**Directing with an LLM.** `scripts/director.py` (also the Studio's *Direct with local LLM* button) reads the whole script with a voice-director prompt and returns, per line, a function, stress words, an intonation `tag`, a delivery `style` and a `pause`. It works on plain text (one segment per sentence) or a timed script (one segment per line, so timing never moves). Each segment must reproduce its input words exactly or the chunk is retried, then falls back to the punctuation rules. A deterministic pass keeps one tag per sentence and removes single-sentence tag blips, so the voice colour does not flicker. Output is the script with `@tag` markers, ready for `--multi`. Stress words and pauses are recorded in the JSON; the pause and tag are rendered, stress is not yet (text tricks like capitals made no reliable difference when measured).
+
+```
+python scripts\director.py script.txt direction.txt out.json --emit tagged.txt
+```
+
+**Timed voiceovers.** A script line like `0:03.0 - 0:07.5   Text to say` has a time slot; `[Music only]` lines stay silent. Use `generate ... --timed` (auto-detected in the Studio). The stitching works per *sentence*, not per line (`scripts/timed_synth.py`, building blocks and tests in `scripts/timeline.py`):
+
+1. Lines that continue a sentence are synthesized together as one take, so the intonation is not reset at every line break.
+2. Each take is checked: edges trimmed, over-long silences inside it shortened, and Whisper must hear at least 92% of the words in order. Up to 3 takes are tried and the best is kept.
+3. The take is cut back into script lines at the quietest point near each line's first word.
+4. A small optimizer chooses one speed (0.88x to 1.30x) and the pauses at the line breaks so each line starts at its slot when it can, no pause drags on, and the sentence ends inside its window (it may spill into the quiet before the next sentence; it is only cut as a last resort, and flagged).
+5. Sentences are levelled to the same speech loudness (at most 4 dB either way) and mixed with short fades.
+
+`work/jobs/<id>/timing.json` records, per line, the speed, lateness vs its slot, words heard, takes and flags. `python scripts/tools/gapcheck.py script.txt render.wav` prints the silent gaps (marking those inside a sentence) and level jumps, to compare renders. `--no-master` writes the synthesis unprocessed apart from one constant gain that puts the peak at -3 dBFS (the model's raw output is about -20 dBFS peak); the untouched file stays in `work/jobs/<id>/raw.wav`. `--cfg 1.5` loosens delivery (default 2.0).
+
+**The `.vcref` file** ([`scripts/vcref.py`](scripts/vcref.py)) is the portable form of a voice: one file holding every clip (lossless FLAC) with its transcript, the default settings, the regex rules, and optionally the full recordings (`--parts`). It is a ZIP archive with a magic comment and per-clip SHA-256 hashes, written and read only through the `Bundle` class. Copy it to another machine, put it in `voices/`, and use `--multi`.
+
+```
+python scripts\vcref.py info voices\me.vcref      # clips, transcripts, rules
+python scripts\vcref.py verify voices\me.vcref    # check hashes
+python scripts\vcref.py unpack voices\me.vcref out_dir
+```
+
+`voices/` and `*.vcref` are git-ignored because they contain your voice. Tests: `.venv\Scripts\python.exe -m unittest discover -s tests`.
 
 ---
 
@@ -191,9 +244,13 @@ Install: `claude --plugin-dir mods/voiceclone-progress` from the repo root.
 ## Repository layout
 
 ```
-scripts/     pipeline code (synth, enroll, master, run, status, vc, paths, rocm_shim, setup_mac.sh)
-dashboard/   web server and HTML pages
+scripts/     pipeline: run, vox_synth, qwen_synth, timed_synth, master, enroll, enroll_multi, takes, director, vcref, vc (CLI), paths, rocm_shim, status
+scripts/legacy/   unused: IndexTTS synth and the old (style)-prefix tagger CLI
+scripts/tools/    standalone helpers (prep_clip.py)
+dashboard/   app_server.py (Studio + API), stats.py (live numbers), app.html, index.html (pipeline), architecture.html, models.html
 configs/     reusable presets
+voices/      packed voice bundles, .vcref (git-ignored)
+tests/       unit tests for vcref and the text splitter
 profiles/    your voice profiles (git-ignored except example.json)
 mods/        Claude Code mod (voiceclone-progress)
 .claude/     Claude Code skill
@@ -216,4 +273,4 @@ output/      final masters (git-ignored)
 
 ## Legacy / unused
 
-`scripts/tagger.py`, `tag_cli.py` (Qwen3-4B emotion tagger) and `scripts/synth.py` (IndexTTS-2.5) are kept but not part of the live pipeline.
+`scripts/legacy/` holds `synth.py` (IndexTTS-2.5) and `tagger_vox.py` / `tag_cli.py` (the old `(style)`-prefix tagger); they are not part of the live pipeline. `scripts/tagger.py` stays in `scripts/` because it is the shared Qwen3-4B loader that `director.py` uses.

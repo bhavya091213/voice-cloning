@@ -18,14 +18,16 @@ h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mut);margin-bottom:18px}
 pre{margin:0;max-height:240px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;color:#b8c0d4;white-space:pre-wrap}
 .wide{grid-column:1/-1}.big{font-size:26px;font-weight:600}
 </style></head><body>
-<h1>VoiceClone pipeline</h1><div class="sub"><span id="sub">connecting…</span> · <a href="/architecture" style="color:var(--acc)">Architecture diagram</a> · <a href="/" style="color:var(--acc)">Studio</a></div>
+<h1>VoiceClone pipeline</h1><div class="sub"><span id="sub">connecting…</span> · <a href="/architecture" style="color:var(--acc)">Architecture diagram</a> · <a href="/" style="color:var(--acc)">Studio</a> · <a href="/models" style="color:var(--acc)">Models</a></div>
 <div class="grid">
- <div class="card"><h2>GPU · RX 6900 XT</h2><div class="big" id="gu">–</div><div class="bar"><i id="gub"></i></div><div class="mut" id="gul">utilization</div>
+ <div class="card"><h2>GPU</h2><div class="big" id="gu">–</div><div class="bar"><i id="gub"></i></div><div class="mut" id="gul">utilization</div>
   <div class="bar" style="margin-top:12px"><i id="gvb"></i></div><div class="mut" id="gvl">VRAM</div></div>
  <div class="card"><h2>System memory</h2><div class="big" id="rm">–</div><div class="bar"><i id="rmb"></i></div><div class="mut" id="rml"></div></div>
  <div class="card"><h2>Current job</h2><div class="big" id="job">idle</div><div class="mut" id="jobt"></div></div>
+ <div class="card"><h2>Skill run</h2><div class="big" id="sk">none</div><div class="mut" id="skl"></div><div class="bar"><i id="skb"></i></div><div id="skp" class="mut" style="margin-top:8px"></div></div>
+ <div class="card"><h2>System check</h2><div class="big" id="dr">not run</div><div class="mut" id="drl"></div><div id="drf" class="mut" style="margin-top:6px"></div></div>
  <div class="card wide"><h2>Pipeline stages</h2><div class="stages" id="stages"></div></div>
- <div class="card wide"><h2>Models</h2><div class="scroll"><table><thead><tr><th>Model</th><th>Role</th><th>Params</th><th>Disk</th><th>Peak VRAM (measured*)</th><th>Download</th></tr></thead><tbody id="models"></tbody></table></div></div>
+ <div class="card wide"><h2>Models</h2><div class="scroll"><table><thead><tr><th>Model</th><th>Role</th><th>Params</th><th>On disk</th><th>Peak VRAM</th></tr></thead><tbody id="models"></tbody></table></div></div>
  <div class="card wide"><h2>Log</h2><pre id="log"></pre></div>
  <div class="card wide"><h2>Recent outputs</h2><div id="outs" class="mut">none yet</div></div>
 </div>
@@ -36,16 +38,20 @@ async function tick(){
   const d=await (await fetch('/api/status',{cache:'no-store'})).json();
   $('sub').textContent='live · '+d.time;
   const g=d.gpu||{};
+  if(g.error){$('gu').textContent='n/a';$('gul').textContent=g.error}
   if(g.util!==undefined){$('gu').textContent=g.util+'%';$('gub').style.width=g.util+'%';
    const p=g.vram_used_gb/g.vram_total_gb*100;$('gvb').style.width=p+'%';$('gvl').textContent='VRAM '+g.vram_used_gb+' / '+g.vram_total_gb+' GB'}
   const r=d.ram;$('rm').textContent=r.used_gb+' GB';$('rmb').style.width=(r.used_gb/r.total_gb*100)+'%';$('rml').textContent='of '+r.total_gb+' GB';
   const p=d.pipeline||{};$('job').textContent=p.job||'idle';
   $('jobt').textContent=p.started?'started '+new Date(p.started*1000).toLocaleTimeString():'waiting for a run';
   $('stages').innerHTML=(p.stages&&p.stages.length?p.stages:[]).map(s=>`<div class="st ${s.state}"><b>${s.name}</b><small>${s.state}${s.detail?' · '+s.detail:''}</small></div>`).join('')||'<span class="mut">No run yet.</span>';
-  $('models').innerHTML=d.models.map(m=>{const dl=m.downloaded_gb===null?'–':(m.downloaded_gb>=m.disk_gb*0.95?'✓ '+m.downloaded_gb+' GB':m.downloaded_gb+' / ~'+m.disk_gb+' GB');
-   return `<tr><td>${m.name}</td><td>${m.role}</td><td>${m.params}</td><td>~${m.disk_gb} GB</td><td>${m.min_vram} GB</td><td>${dl}</td></tr>`}).join('');
+  $('models').innerHTML=d.models.map(m=>`<tr><td>${m.name}</td><td>${m.role}</td><td>${m.params}</td><td>${m.disk_gb===null?'<span class="mut">not installed</span>':m.disk_gb+' GB'}</td><td>${m.peak_vram?m.peak_vram+' GB':'–'}</td></tr>`).join('');
+  const sk=d.skill;if(sk){const n=sk.phases.filter(x=>x.state==='done'||x.state==='skipped').length;$('sk').textContent=n+' / '+sk.phases.length;$('skl').textContent=sk.label||'';$('skb').style.width=(n/sk.phases.length*100)+'%';
+   $('skp').innerHTML=sk.phases.map(x=>`<div class="${x.state}">${{done:'✔',running:'▶',error:'✖',skipped:'–',pending:'○'}[x.state]||'?'} ${x.id}. ${x.name}${x.detail&&x.state!=='pending'?' <span class="mut">· '+x.detail+'</span>':''}</div>`).join('')}
+  const dc=d.doctor;if(dc){$('dr').textContent=dc.ok?'healthy':'needs attention';$('dr').style.color=dc.ok?'var(--ok)':'var(--err)';$('drl').textContent='checked '+new Date(dc.checked*1000).toLocaleString();$('drf').innerHTML=dc.failing.map(x=>'✖ '+x).join('<br>')}
   const l=$('log');const atEnd=l.scrollTop+l.clientHeight>=l.scrollHeight-8;l.textContent=d.log.join('\n')||'(empty)';if(atEnd)l.scrollTop=l.scrollHeight;
-  $('outs').innerHTML=d.outputs.length?d.outputs.map(o=>`${o.name} · ${o.mb} MB`).join('<br>'):'none yet';
+  const sig=JSON.stringify(d.outputs);if(sig!==window._outs){window._outs=sig; // only redraw when the list changes, so a playing clip is not reset
+   $('outs').innerHTML=d.outputs.length?d.outputs.map(o=>`<div style="padding:6px 0;border-top:1px solid var(--line)">${o.name} <span class="mut">· ${o.mb} MB · <a href="/files/output/${encodeURIComponent(o.name)}?dl=1" style="color:var(--acc)">download</a></span><br><audio controls preload="none" style="width:100%" src="/files/output/${encodeURIComponent(o.name)}"></audio></div>`).join(''):'none yet'}
  }catch(e){$('sub').textContent='disconnected – retrying…'}
 }
 tick();setInterval(tick,2000);

@@ -144,12 +144,35 @@ def cmd_enroll(a):
     sys.exit(0 if ok else 1)
 
 
+def cmd_refs(a):
+    """Build one reference clip per intonation from the recorded parts, then pack them into voices/<speaker>.vcref."""
+    import vcref
+    d = get_profile(a.name)
+    sp = REF / d["speaker"]
+    p_set(3, "running", "building intonation clips (A neutral, B six emotions, C questions)")
+    r = subprocess.run([PY, "-W", "ignore", str(ROOT / "scripts" / "enroll_multi.py"), d["speaker"]],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode:
+        p_set(3, "error", r.stderr.strip()[-300:])
+        sys.exit(r.stderr.strip()[-600:] or 1)
+    out_file = vcref.pack(sp / "refs", ROOT / "voices" / f"{d['speaker']}.vcref", name=d["speaker"], config=d["config"],
+                          parts_dir=(sp / "parts") if a.parts else None)
+    n = len(json.loads((sp / "refs" / "index.json").read_text(encoding="utf-8"))["clips"])
+    p_set(3, "done", f"{n} intonation clips -> {out_file.name}")
+    print(r.stderr.strip())
+    print(r.stdout.strip())
+    print(f"packed {out_file} ({out_file.stat().st_size / 1e6:.1f} MB)")
+
+
 def cmd_generate(a):
     d = get_profile(a.name)
     c = {**d["config"], **{k: getattr(a, k) for k in DEFAULTS if getattr(a, k) is not None}}
     p_set(6, "running", f"{a.job} · {c['engine']}", job=a.job)
     cmd = [PY, str(ROOT / "scripts" / "run.py"), "--speaker", d["speaker"], "--text-file", a.text_file, "--job", a.job,
-           "--engine", c["engine"], "--style", c["style"], "--denoise", str(c["denoise"]), "--lufs", str(c["lufs"])]
+           "--engine", c["engine"], "--style", c["style"], "--denoise", str(c["denoise"]), "--lufs", str(c["lufs"])] + (["--timed"] if a.timed else []) \
+          + (["--ref-tag", a.ref_tag] if a.ref_tag else []) + (["--cfg", str(a.cfg)] if a.cfg is not None else []) \
+          + (["--no-master"] if a.no_master else []) + (["--title", a.title] if a.title else []) + (["--stack"] if a.stack else []) \
+          + (["--vcref", a.vcref or str(ROOT / "voices" / f"{d['speaker']}.vcref")] if (a.vcref or a.multi) else [])
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     wav = ROOT / "output" / f"{a.job}.wav"
     p_set(6, "done" if wav.exists() else "error", str(wav) if wav.exists() else (r.stderr.strip()[-300:] or "see work/pipeline.log"))
@@ -263,6 +286,10 @@ pp.add_argument("--engine", choices=["qwen", "voxcpm"])
 pp.add_argument("--style")
 pp.add_argument("--lufs", type=float)
 pp.add_argument("--denoise", type=float)
+pf = sub.add_parser("refs")
+pf.set_defaults(f=cmd_refs)
+pf.add_argument("name")
+pf.add_argument("--parts", action="store_true", help="also embed the full recordings in the .vcref")
 pe = sub.add_parser("enroll")
 pe.set_defaults(f=cmd_enroll)
 pe.add_argument("name")
@@ -272,6 +299,14 @@ pg.set_defaults(f=cmd_generate)
 pg.add_argument("name")
 pg.add_argument("--text-file", required=True)
 pg.add_argument("--job", required=True)
+pg.add_argument("--timed", action="store_true", help="text-file is a timestamped voiceover script")
+pg.add_argument("--vcref", default="", help="voice bundle to use (regex-split takes, one intonation clip each)")
+pg.add_argument("--multi", action="store_true", help="use voices/<speaker>.vcref (build it with: refs <name>)")
+pg.add_argument("--ref-tag", default="", help="use ref_<tag>.wav/.txt (see enroll.py --tag)")
+pg.add_argument("--cfg", type=float, help="VoxCPM guidance, default 2.0; lower = more varied intonation")
+pg.add_argument("--no-master", action="store_true", help="skip mastering (raw output)")
+pg.add_argument("--stack", action="store_true", help="prompt = neutral clip + the tag's clip (voice anchored on neutral)")
+pg.add_argument("--title", default="", help="name shown in the Studio library")
 pg.add_argument("--engine", choices=["qwen", "voxcpm"])
 pg.add_argument("--style")
 pg.add_argument("--lufs", type=float)

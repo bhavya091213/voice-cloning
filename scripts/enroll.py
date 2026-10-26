@@ -19,7 +19,8 @@ import paths  # noqa: E402
 REF = paths.REFERENCE
 
 
-def main(spk):
+def main(spk, target=15.0, tag=""):
+    """target: wanted clip length in s (window 0.6x..1.33x). tag: write ref_<tag>.wav/.txt instead of ref.wav/.txt."""
     d = REF / spk
     parts = {p: d / "parts" / f"{p}.wav" for p in "ABC" if (d / "parts" / f"{p}.wav").exists()}
     if not parts:
@@ -42,15 +43,15 @@ def main(spk):
         for j in range(i, len(sents)):
             t0, t1 = sents[i][0]["start"], sents[j][-1]["end"]
             dur = t1 - t0
-            if dur > 20:
+            if dur > target * 4 / 3:
                 break
-            if dur < 9:
+            if dur < target * 0.6:
                 continue
             wps = sum(len(s) for s in sents[i:j + 1]) / dur
             txt = " ".join(w["word"].strip() for s in sents[i:j + 1] for w in s)
             toks = [t.lower().strip(".,;:?!\"'") for t in txt.split()]
             allit = sum(a[:1] == b[:1] for a, b in zip(toks, toks[1:])) / max(1, len(toks) - 1)  # tongue-twister penalty
-            score = -abs(dur - 15) / 5 - abs(wps - 2.7) - (3 if re.search(r"\d", txt) else 0) - 12 * allit
+            score = -abs(dur - target) / (target / 3) - abs(wps - 2.7) - (3 if re.search(r"\d", txt) else 0) - 12 * allit
             if score > best_score:
                 best, best_score = (i, j, t0, t1, txt), score
     if best is None:  # fall back to the first ~15 s
@@ -68,10 +69,17 @@ def main(spk):
     clip = x[int(a * sr):int(b * sr)].copy()
     f = int(0.01 * sr)
     clip[:f] *= np.linspace(0, 1, f); clip[-f:] *= np.linspace(1, 0, f)
-    sf.write(d / "ref.wav", clip, sr, subtype="PCM_24")
-    (d / "ref.txt").write_text(txt, encoding="utf-8")
+    stem = f"ref_{tag}" if tag else "ref"
+    sf.write(d / f"{stem}.wav", clip, sr, subtype="PCM_24")
+    (d / f"{stem}.txt").write_text(txt, encoding="utf-8")
     print(json.dumps({"seconds": round(len(clip) / sr, 1), "transcript": txt, "source": src_name}))
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("speaker")
+    ap.add_argument("--target", type=float, default=15.0)
+    ap.add_argument("--tag", default="")
+    a = ap.parse_args()
+    main(a.speaker, a.target, a.tag)
