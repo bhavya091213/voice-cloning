@@ -16,7 +16,7 @@ record / upload (Parts A, B, C) -> pick reference clip (Whisper) -> TTS clone ->
    - **Qwen3-TTS 1.7B Base** (`scripts/qwen_synth.py`): 24 kHz, in-context cloning from the reference and its transcript.
 4. **Mastering** (`scripts/master.py`): optional denoise, de-ess, EQ, 3-band compression, bus compression (~3 dB gain reduction), LUFS normalization, lookahead limiter and true-peak ceiling (-1 dBTP). Output is 24-bit 48 kHz.
 
-`scripts/run.py` orchestrates one job; `scripts/status.py` feeds the dashboard.
+`scripts/vc.py` is the skill CLI (profiles, doctor, phase tracking); `scripts/run.py` orchestrates one job; `scripts/status.py` feeds the dashboard.
 
 ## Web UI
 
@@ -77,3 +77,10 @@ output/      final masters (git-ignored)
 
 - Mastering dulls 6-10 kHz by several dB (de-esser and high-band multiband); needs easing.
 - Qwen3-TTS Base has no emotion/instruction control.
+
+## Agent skills and Claude mod
+
+- `profiles/<name>.json` + `configs/presets/*.json`: reusable voices and settings (reference audio stays in `reference/`).
+- `.claude/skills/voiceclone` (Claude Code) and `.agents/skills/voiceclone` (Codex): the same phased workflow over `scripts/vc.py`.
+- `python scripts/vc.py doctor [--fix]`: dependency check, writes `work/doctor.json`.
+- The `voiceclone-progress` Claude mod (`/vc-progress`) shows phases, output playback and the doctor.

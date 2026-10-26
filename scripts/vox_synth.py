@@ -1,5 +1,5 @@
-"""python vox_synth.py <text_file> <ref.wav> <ref.txt> <out.wav> [style]
-VoxCPM2 (48 kHz out). 'Ultimate cloning': reference audio + its transcript. Optional style prefix in parentheses.
+"""python vox_synth.py <text_file> <ref.wav> <ref.txt> <out.wav> 
+VoxCPM2 (48 kHz out). 'Ultimate cloning': reference audio + its transcript. Text lines may start with a (delivery instruction) written by the tagger.
 """
 import re
 import sys
@@ -38,16 +38,42 @@ def chunks(text):
     return out
 
 
-def main(text_file, ref_wav, ref_txt, out, style=""):
-    text = Path(text_file).read_text(encoding="utf-8-sig").replace("\ufeff", "")
+TAG_RE = re.compile(r"^\(([^()]{1,120})\)\s*(.*)$")
+
+
+def segments(text):
+    """Tagged script -> [(style, text, gap_after)]. A line '(style)text' is directed; plain lines are not.
+    A blank line after a line makes the pause paragraph-sized."""
+    lines = text.replace(chr(13), "").split(chr(10))
+    out = []
+    for i, ln in enumerate(lines):
+        ln = ln.strip()
+        if not ln:
+            if out:
+                out[-1][2] = GAP_PARA
+            continue
+        m = TAG_RE.match(ln)
+        style, body = (m.group(1).strip(), m.group(2).strip()) if m else ("", ln)
+        if not body:
+            continue
+        cs = chunks(body)
+        for j, (c, gap) in enumerate(cs):
+            out.append([style, c, GAP_SENT if j < len(cs) - 1 else 0.3])
+    if out:
+        out[-1][2] = 0.0
+    return out
+
+
+def main(text_file, ref_wav, ref_txt, out):
+    text = Path(text_file).read_text(encoding="utf-8-sig").replace(chr(0xFEFF), "")
     ref_text = Path(ref_txt).read_text(encoding="utf-8").strip()
     status.stage("Synthesize", "running", "loading VoxCPM2")
     model = VoxCPM.from_pretrained(MODEL, load_denoiser=False)
     sr = model.tts_model.sample_rate
     parts = []
-    cs = chunks(text)
-    for i, (c, gap) in enumerate(cs):
-        status.stage("Synthesize", "running", f"chunk {i + 1}/{len(cs)}")
+    segs = segments(text)
+    for i, (style, c, gap) in enumerate(segs):
+        status.stage("Synthesize", "running", f"chunk {i + 1}/{len(segs)}")
         t = time.time()
         if style:
             # controllable cloning: the parenthetical is only read as an instruction when the reference is NOT
@@ -57,11 +83,11 @@ def main(text_file, ref_wav, ref_txt, out, style=""):
             wav = model.generate(text=c, prompt_wav_path=ref_wav, prompt_text=ref_text,
                                  reference_wav_path=ref_wav, cfg_value=2.0, inference_timesteps=10)
         a = np.asarray(wav, dtype=np.float32).squeeze()
-        print(f"chunk {i + 1}/{len(cs)} {len(a) / sr:.1f}s audio in {time.time() - t:.1f}s", flush=True)
+        print(f"chunk {i + 1}/{len(segs)} {len(a) / sr:.1f}s audio in {time.time() - t:.1f}s  [{style}]", flush=True)
         parts += [a, np.zeros(int(sr * gap), np.float32)]
     sf.write(out, np.concatenate(parts), sr, subtype="FLOAT")
     print("sample rate", sr, "peak VRAM GB", round(torch.cuda.max_memory_allocated() / 1e9, 1))
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:6])
+    main(*sys.argv[1:5])

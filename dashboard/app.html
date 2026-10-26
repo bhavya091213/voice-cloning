@@ -43,7 +43,12 @@ pre{margin:0;max-height:160px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,
  <div class="row" style="margin:10px 0"><label class="mut">Engine
   <select id="engine" style="background:#0b0d11;color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit">
    <option value="voxcpm">VoxCPM2 · 48 kHz · style control</option><option value="qwen">Qwen3-TTS 1.7B · 24 kHz</option></select></label></div>
- <input id="style" placeholder="Style, plain language (VoxCPM2 only), e.g. quiet, emotional documentary narrator" value="quiet, emotional documentary narrator">
+ <input id="style" placeholder="Direction, plain language, e.g. quiet, emotional documentary narrator" value="quiet, emotional documentary narrator">
+ <div class="row" style="margin-top:10px"><button id="tagBtn">Tag with local LLM</button>
+  <span class="mut" id="tagMsg">The LLM reads your direction and writes a delivery instruction for each segment. You review it before anything is generated.</span></div>
+ <div id="taggedBox" hidden style="margin-top:10px">
+  <div class="mut" style="margin-bottom:4px">Tagged script (editable). Each line is <code>(delivery instruction)text</code>; the instruction is performed, not spoken. A blank line = paragraph pause. This exact text is what gets generated.</div>
+  <textarea id="tagged" style="min-height:200px"></textarea></div>
  <div class="row" style="margin-top:10px"><button class="pri" id="genBtn">Generate</button>
   <label class="mut">Denoise <input type="number" id="denoise" min="0" max="1" step="0.05" value="0"></label>
   <label class="mut">Target LUFS <input type="number" id="lufs" value="-16" step="1"></label>
@@ -51,6 +56,12 @@ pre{margin:0;max-height:160px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,
  <div class="stages" id="stages"></div>
  <div id="result" style="margin:12px 0"></div>
  <pre id="log"></pre>
+</div>
+
+<div class="card">
+ <h2>3 · Recent outputs</h2>
+ <div class="mut" style="margin-bottom:8px">Every finished job, newest first. Text shown is the start of the script that was generated.</div>
+ <div id="library">loading…</div>
 </div>
 
 <script>
@@ -138,9 +149,27 @@ $('enrollBtn').onclick=async()=>{
 
 /* ---------- generate ---------- */
 let poll=null;
+const stale=()=>{$('taggedBox').hidden=true;$('tagged').value=''};
+$('text').addEventListener('input',stale);$('style').addEventListener('input',stale);
+$('tagBtn').onclick=async()=>{
+ if($('engine').value!=='voxcpm'){$('tagMsg').textContent='Tagging is for VoxCPM2 (Qwen3-TTS Base has no delivery control).';return}
+ $('tagBtn').disabled=true;$('tagMsg').textContent='Tagging… loading the LLM (~1 min the first time)';
+ try{const r=await api('/api/tag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('text').value,style:$('style').value})});
+  const t0=Date.now();
+  const iv=setInterval(async()=>{try{const j=await api('/api/tag?id='+r.id);
+   if(j.state==='running'){$('tagMsg').textContent='Tagging… '+Math.round((Date.now()-t0)/1000)+'s';return}
+   clearInterval(iv);$('tagBtn').disabled=false;
+   if(j.state==='error'){$('tagMsg').textContent='Tagging failed: '+j.error;return}
+   $('tagged').value=j.tagged;$('taggedBox').hidden=false;
+   $('tagMsg').textContent='Review and edit the tagged script below, then Generate.'+(j.fallback_chunks?' ('+j.fallback_chunks+' chunk(s) fell back to the plain direction.)':'');
+  }catch(e){}},2000);
+ }catch(e){$('tagBtn').disabled=false;$('tagMsg').textContent=e.message}
+};
 $('genBtn').onclick=async()=>{
  $('genMsg').textContent='';$('result').innerHTML='';
- try{const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speaker:spk(),text:$('text').value,engine:$('engine').value,style:$('style').value,denoise:+$('denoise').value,lufs:+$('lufs').value})});
+ const tagged=!$('taggedBox').hidden&&$('tagged').value.trim();
+ if($('engine').value==='voxcpm'&&$('style').value.trim()&&!tagged){$('genMsg').textContent='Tag the script first so you can review it (or clear the direction to generate plain).';return}
+ try{const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speaker:spk(),text:tagged?$('tagged').value:$('text').value,engine:$('engine').value,style:$('style').value,denoise:+$('denoise').value,lufs:+$('lufs').value})});
   $('genBtn').disabled=true;watch(r.job);
  }catch(e){$('genMsg').textContent=e.message}
 };
@@ -169,4 +198,12 @@ function show(j){
 /* resume view of a running/last job after page reload */
 api('/api/job').then(j=>{if(j.state==='running'){$('genBtn').disabled=true;watch(j.job)}else if(j.state==='done')show(j)}).catch(()=>{});
 setInterval(()=>api('/api/status').then(s=>{const g=s.gpu||{};if(g.util!==undefined)$('gpu').textContent=`GPU ${g.util}% · VRAM ${g.vram_used_gb}/${g.vram_total_gb} GB`}).catch(()=>{}),3000);
+
+async function loadLibrary(){
+ try{const L=await api('/api/jobs');
+  $('library').innerHTML=L.length?L.map(j=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><b>${j.job}</b> <span class="badge">${(j.speaker||'')}</span><span class="badge">${(j.engine||'')}</span>${j.master?`<span class="badge">${j.master.lufs} LUFS</span>`:''}
+   <div class="mut" style="margin:4px 0">${(j.text||'').replace(/</g,'&lt;')}</div><audio controls preload="none" style="width:100%" src="${bust('/files/work/jobs/'+j.job+'/master.wav')}"></audio></div>`).join(''):'No finished jobs yet.';
+ }catch(e){$('library').textContent='could not load: '+e.message}
+}
+loadLibrary();setInterval(loadLibrary,20000);
 </script></body></html>

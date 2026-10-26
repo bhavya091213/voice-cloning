@@ -29,7 +29,11 @@ a = ap.parse_args()
 
 jd = ROOT / "work" / "jobs" / a.job
 jd.mkdir(parents=True, exist_ok=True)
-shutil.copy(a.text_file, jd / "text.txt")
+import re  # noqa: E402
+_txt = Path(a.text_file).read_text(encoding="utf-8-sig")
+if a.engine == "qwen":  # Qwen3-TTS Base has no delivery control: drop the (instruction) prefixes
+    _txt = chr(10).join(re.sub(r"^\s*\([^()]{1,120}\)\s*", "", ln) for ln in _txt.splitlines())
+(jd / "text.txt").write_text(_txt, encoding="utf-8")
 ENGINES = {"qwen": ("Qwen3-TTS 1.7B (24 kHz)", "qwen_synth.py"), "voxcpm": ("VoxCPM2 (48 kHz)", "vox_synth.py")}
 meta = {"job": a.job, "speaker": a.speaker, "engine": ENGINES[a.engine][0], "style": a.style, "state": "running", "timings": {}}
 
@@ -49,8 +53,6 @@ try:
     t = time.time(); status.stage("Synthesize", "running", f"loading {ENGINES[a.engine][0]}")
     cmd = [PY, "-W", "ignore", str(ROOT / "scripts" / ENGINES[a.engine][1]), str(jd / "text.txt"),
            str(ref / "ref.wav"), str(ref / "ref.txt"), str(jd / "raw.wav")]
-    if a.engine == "voxcpm":
-        cmd.append(a.style)
     p = subprocess.run(cmd,
                        env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace")
     for line in p.stdout.splitlines():

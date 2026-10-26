@@ -24,3 +24,10 @@ dashboard/token.txt
 *.wav
 *.flac
 *.mp3
+
+# per-user voice profiles (keep the folder, not the files)
+profiles/*.json
+!profiles/example.json
+
+# local agent settings
+.claude/settings.local.json

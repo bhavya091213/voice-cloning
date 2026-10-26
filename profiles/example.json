@@ -1,0 +1,5 @@
+{
+  "speaker": "my_voice",
+  "created": "2026-01-01",
+  "config": {"engine": "voxcpm", "style": "(warm, steady, slow)", "lufs": -18, "denoise": 0.0}
+}

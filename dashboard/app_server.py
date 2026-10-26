@@ -36,8 +36,9 @@ FFMPEG = shutil.which("ffmpeg") or next(iter(glob.glob(
 MAX_BODY = 200 * 1024 * 1024
 NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 FILE_RE = re.compile(r"^(reference/[a-z0-9_-]+/(raw|clean|ref|prompt_15s|prompt_expressive)\.wav|"
-                     r"reference/[a-z0-9_-]+/parts/[ABC]\.wav|work/jobs/job_[0-9_]+/(raw|master)\.wav)$")
+                     r"reference/[a-z0-9_-]+/parts/[ABC]\.wav|work/jobs/job_[a-z0-9_]+/(raw|master)\.wav)$")
 
+tag_jobs = {}  # id -> {"state": running|done|error, "tagged": str, "error": str}
 job_lock = threading.Lock()
 current = {"proc": None, "id": None}
 
@@ -110,13 +111,27 @@ class H(BaseHTTPRequestHandler):
                     out.append({"name": d.name, "parts": [p for p in "ABC" if (d / "parts" / f"{p}.wav").exists()],
                                 "enrolled": (d / "ref.wav").exists()})
             return self._send(200, out)
+        if path == "/api/jobs":
+            out = []
+            for jd in sorted((ROOT / "work" / "jobs").glob("job_*"), key=lambda p: p.stat().st_mtime, reverse=True):
+                if (jd / "master.wav").exists() and (jd / "meta.json").exists():
+                    m = json.loads((jd / "meta.json").read_text(encoding="utf-8"))
+                    out.append({"job": jd.name, "engine": m.get("engine"), "style": m.get("style"), "speaker": m.get("speaker"),
+                                "text": (jd / "text.txt").read_text(encoding="utf-8")[:160] if (jd / "text.txt").exists() else "",
+                                "master": m.get("master")})
+                if len(out) >= 30:
+                    break
+            return self._send(200, out)
         if path == "/api/job":
             jid = self._q().get("id")
             jobs = sorted((ROOT / "work" / "jobs").glob("job_*"), key=lambda p: p.stat().st_mtime)
-            jd = (ROOT / "work" / "jobs" / jid) if jid and re.fullmatch(r"job_[0-9_]+", jid) else (jobs[-1] if jobs else None)
+            jd = (ROOT / "work" / "jobs" / jid) if jid and re.fullmatch(r"job_[a-z0-9_]+", jid) else (jobs[-1] if jobs else None)
             if not jd or not (jd / "meta.json").exists():
                 return self._send(404, {"error": "no job"})
             return self._send(200, json.loads((jd / "meta.json").read_text(encoding="utf-8")))
+        if path == "/api/tag":
+            t = tag_jobs.get(self._q().get("id", ""))
+            return self._send(200, t) if t else self._send(404, {"error": "no such tag job"})
         if path.startswith("/files/"):
             return self._file(path[len("/files/"):])
         self._send(404, {"error": "not found"})
@@ -153,6 +168,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.loads(p.stdout.strip().splitlines()[-1]))
             if path == "/api/generate":
                 return self._generate(json.loads(body))
+            if path == "/api/tag":
+                return self._tag(json.loads(body))
         except ValueError as e:
             return self._send(400, {"error": str(e)})
         except Exception as e:
@@ -184,6 +201,38 @@ class H(BaseHTTPRequestHandler):
         x, sr = sf.read(d / f"{part}.wav", dtype="float32")
         return clean.part_stats(x, sr)
 
+    def _tag(self, req):
+        text = (req.get("text") or "").strip()
+        direction = (req.get("style") or "").strip()[:300]
+        if not text or len(text) > 20000:
+            raise ValueError("text must be 1-20000 chars")
+        if not direction:
+            raise ValueError("write a style direction first")
+        with job_lock:
+            if busy() or any(t["state"] == "running" for t in tag_jobs.values()):
+                return self._send(409, {"error": "the GPU is busy with another job"})
+            tid = "tag_" + time.strftime("%Y%m%d_%H%M%S")
+            td = ROOT / "work" / "tags"
+            td.mkdir(parents=True, exist_ok=True)
+            (td / f"{tid}.txt").write_text(text, encoding="utf-8")
+            (td / f"{tid}.dir").write_text(direction, encoding="utf-8")
+            tag_jobs[tid] = {"state": "running"}
+
+        def run():
+            try:
+                p = subprocess.run([PY, "-W", "ignore", str(ROOT / "scripts" / "tag_cli.py"), str(td / f"{tid}.txt"),
+                                    str(td / f"{tid}.dir"), str(td / f"{tid}.json")], capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   env={**__import__("os").environ, "HF_HOME": str(ROOT / "models" / "hf_cache")})
+                if p.returncode:
+                    raise RuntimeError((p.stderr.strip().splitlines() or ["tagger failed"])[-1])
+                tag_jobs[tid] = {"state": "done", **json.loads((td / f"{tid}.json").read_text(encoding="utf-8"))}
+            except Exception as e:
+                tag_jobs[tid] = {"state": "error", "error": str(e)}
+
+        threading.Thread(target=run, daemon=True).start()
+        self._send(200, {"id": tid})
+
     def _generate(self, req):
         spk = self._spk(req.get("speaker", ""))
         text = (req.get("text") or "").strip()
@@ -192,7 +241,7 @@ class H(BaseHTTPRequestHandler):
         if not (ROOT / "reference" / spk / "ref.wav").exists():
             raise ValueError("speaker not enrolled yet")
         with job_lock:
-            if busy():
+            if busy() or any(t["state"] == "running" for t in tag_jobs.values()):
                 return self._send(409, {"error": "a job is already running"})
             jid = "job_" + time.strftime("%Y%m%d_%H%M%S")
             jd = ROOT / "work" / "jobs" / jid
