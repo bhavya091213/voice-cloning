@@ -19,7 +19,12 @@ button.rec{background:#5b1f24;border-color:var(--err)}button:disabled{opacity:.4
 input,textarea,select{background:#0b0d11;color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit;width:100%}
 select{width:auto}textarea{min-height:130px;resize:vertical}input[type=number]{width:90px}input[type=range]{padding:0;width:160px}input[type=checkbox]{width:auto}
 label{color:var(--mut)}label.k{display:inline-flex;gap:6px;align-items:center}
-.part{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}
+.part{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px}.part summary{cursor:pointer}
+.grp{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--acc);margin:14px 0 6px}
+.how{color:var(--tx);margin:4px 0 8px;font-style:italic}.lines{background:#0b0d11;border-radius:6px;padding:6px;margin:8px 0;max-height:340px;overflow:auto}
+.ln{display:flex;gap:10px;padding:7px 8px;border-radius:6px;border-left:3px solid transparent}.ln .n{color:var(--mut);min-width:22px;text-align:right}
+.ln .tx{font-size:15px;line-height:1.45}.ln.cur{background:#1a2740;border-left-color:var(--acc)}.ln.cur .tx{font-size:18px}
+.dir{display:inline-block;color:var(--run);font-size:12px;margin-right:8px}.tg{color:var(--mut);font-size:11px}
 .script{white-space:pre-wrap;background:#0b0d11;border-radius:6px;padding:10px;margin:8px 0;max-height:230px;overflow:auto;font-size:13.5px}
 .meter{height:8px;background:#0b0d11;border-radius:5px;overflow:hidden;width:200px}.meter i{display:block;height:100%;width:0;background:var(--ok)}
 .badge{display:inline-block;border:1px solid var(--line);border-radius:12px;padding:1px 9px;font-size:12px;margin:2px 4px 2px 0}
@@ -66,7 +71,7 @@ section[hidden]{display:none}
 
  <div class="card">
   <h2>3 · Options &amp; generate</h2>
-  <div class="row"><label class="k">Engine <select id="engine"><option value="voxcpm">VoxCPM2 · 48 kHz</option><option value="qwen">Qwen3-TTS 1.7B · 24 kHz</option></select></label>
+  <div class="row"><label class="k">Engine <select id="engine"><option value="voxcpm">VoxCPM2 · 48 kHz</option><option value="qwen">Qwen3-TTS 1.7B · 24 kHz</option><option value="mlx">Qwen3-TTS via MLX · Apple Silicon only</option></select></label>
    <label class="k"><input type="checkbox" id="multi"> Use intonation clips</label>
    <label class="k">Looseness <input type="range" id="cfg" min="1" max="3" step="0.1" value="2"><b id="cfgv">2.0</b></label>
    <span class="mut">lower = more varied delivery, higher = closer to the reference</span></div>
@@ -97,7 +102,7 @@ section[hidden]{display:none}
  <div class="card">
   <h2>3 · Intonation clips</h2>
   <div class="row"><button class="pri" id="refsBtn">Build intonation clips</button>
-   <span class="mut">One clip per intonation from your three parts (neutral, six emotions, question), packed into one <code>.vcref</code> file. Needs all three parts; takes about a minute.</span></div>
+   <span class="mut">Cuts one clip per labelled delivery from every part you recorded (neutral, emotions, question shapes, conversation, explainer, story, ads, pacing, emphasis, numbers, long form), measures each clip's cadence, and packs everything into one <code>.vcref</code>. Needs parts A, B and C; more parts means more clips. Takes a few minutes.</span></div>
   <div id="refsOut" class="gap"></div>
  </div>
 </section>
@@ -153,7 +158,7 @@ async function loadVoices(){
  $('voice').innerHTML=ready.length?ready.map(v=>`<option value="${esc(v.name)}">${esc(v.name)}</option>`).join(''):'<option value="">No voice yet: record one in Voices</option>';
  if(cur&&ready.some(v=>v.name===cur))$('voice').value=cur;
  $('spkList').innerHTML=VOICES.map(v=>`<option value="${esc(v.name)}">`).join('');
- voiceChanged();
+ voiceChanged();updateBadges();
 }
 function voice(){return VOICES.find(v=>v.name===$('voice').value)}
 function voiceChanged(){
@@ -188,7 +193,7 @@ const stale=()=>{$('taggedBox').hidden=true;$('tagged').value='';taggedLive=fals
 $('text').addEventListener('input',()=>{stale();detect()});$('style').addEventListener('input',stale);
 $('cfg').oninput=()=>$('cfgv').textContent=(+$('cfg').value).toFixed(1);
 $('master').onchange=()=>{$('masterOpts').style.opacity=$('master').checked?1:.4;$('lufs').disabled=$('denoise').disabled=!$('master').checked};
-$('engine').onchange=()=>{const q=$('engine').value==='qwen';if(q)$('multi').checked=false;$('multi').disabled=q||!(voice()&&voice().vcref_mb);$('tagBtn').disabled=q};
+$('engine').onchange=()=>{const q=$('engine').value!=='voxcpm';if(q)$('multi').checked=false;$('multi').disabled=q||!(voice()&&voice().vcref_mb);$('tagBtn').disabled=q};
 
 $('tagBtn').onclick=async()=>{
  if(!$('text').value.trim()){$('tagMsg').textContent='Paste a script first.';return}
@@ -244,48 +249,78 @@ function showResult(j){
 api('/api/job').then(j=>{if(j.state==='running'){$('genBtn').disabled=true;$('log').hidden=false;watch(j.job)}}).catch(()=>{});
 
 /* ---------- voices: recorder ---------- */
-const SCRIPT={
-A:{title:'Part A · Neutral narration (~60 s)',text:`The big brown fox jumped quickly over the fence, then paused beside a quiet stream.
-Thirty-three thieves thought they thrilled the throne throughout Thursday.
-She sells seashells by the shore, and the measure of pleasure is a rare treasure.
-Judge George chose a large orange from the church's garden.
-"Why would you ask?" Yvonne said. "We all know the answer, don't we?"
-A cheerful young man could hardly wait to bring home a loaf of fresh bread, a few green beans, and some very ripe peaches.
-The pale moon rose over the vast, calm lake; a gentle breeze moved through the tall pines, and far off, a lone bird called.
-Please call Paul at five-oh-nine, eight-seven-six, four-three-two-one, or send it by noon on June twenty-ninth.
-Dad took the book out of the rug-covered box; Ken's boat rode the foam toward home.`},
-B:{title:'Part B · Expressive (~35 s) — commit to each emotion',text:`(Excited, fast) "No way! You actually got it done? That is absolutely incredible, I knew you could do it!"
-
-(Warm, soft, slow) "Take your time. There's no rush at all. Everything is going to be just fine."
-
-(Serious, low, deliberate) "Listen carefully. What happens next matters more than anything we've done so far."
-
-(Sad, quiet) "I really thought it would be different this time. I miss how things used to be."
-
-(Annoyed, sharp) "Seriously? Again? I told you twice already. Just put it back where it belongs."
-
-(Playful, teasing) "Oh, you think you're so clever, don't you? Well, we'll just see about that."`},
-C:{title:'Part C · Short utterances (~15 s) — pause ~1 s between',text:`Yes. / No. / Maybe. / Right. / Okay, sure. / Hmm, let me think. / Really? / What do you mean? / Wait, hold on. / Thank you so much. / Ha, that's great. / Ahh, finally.`}};
+let PACK=[];
 const spk=()=>$('spk').value.trim().toLowerCase();
 const WK=`class R extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('rec',R)`;
 let rec=null;
+const haveParts=()=>new Set((VOICES.find(v=>v.name===spk())||{}).parts||[]);
+function renderParts(){
+ const groups={};PACK.forEach(s=>(groups[s.group]=groups[s.group]||[]).push(s));
+ let html='<div class="mut" id="packSum" style="margin-bottom:10px"></div>';
+ for(const [g,secs] of Object.entries(groups)){
+  html+=`<div class="grp">${esc(g)}</div>`;
+  for(const s of secs)html+=`<details class="part" id="sec${s.id}"><summary><b>Part ${s.id} · ${esc(s.title)}</b>
+   <span class="mut"> · ~${s.minutes} min · ${s.items.length} line${s.items.length>1?'s':''}</span> <span id="b${s.id}"></span></summary>
+   <div class="mut" style="margin-top:6px">${esc(s.goal)}</div><div class="how">${esc(s.how)}</div>
+   <div class="lines" id="l${s.id}">${s.items.map((it,k)=>`<div class="ln" data-k="${k}"><span class="n">${k+1}</span><div>
+     ${it.dir?`<span class="dir">${esc(it.dir)}</span>`:''}${it.tag?`<span class="tg">@${esc(it.tag)}</span>`:''}<div class="tx">${esc(it.text)}</div></div></div>`).join('')}</div>
+   <div class="row"><button id="rb${s.id}">● Record</button><button id="nx${s.id}" disabled>Next line ▶</button><button id="bk${s.id}" disabled>◀ Back</button>
+    <div class="meter"><i id="m${s.id}"></i></div><span class="mut" id="t${s.id}"></span>
+    <label class="k">or <input type="file" accept="audio/*" id="f${s.id}" style="width:auto;padding:4px"></label></div>
+   <div class="mut" style="margin-top:4px">While recording press <b>Next line</b> (or Space / →) right after you finish each line; it lets the clip cutter find your lines exactly. Skipping it is fine.</div>
+   <div id="s${s.id}" style="margin-top:6px"></div><audio id="a${s.id}" controls hidden></audio></details>`;
+ }
+ $('parts').innerHTML=html;
+ for(const s of PACK){
+  $('rb'+s.id).onclick=async()=>{try{rec?(rec.p===s.id?await stopRec():alert('Stop the other recording first')):await startRec(s.id)}catch(e){$('s'+s.id).innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}};
+  $('nx'+s.id).onclick=()=>nextLine(1);$('bk'+s.id).onclick=()=>nextLine(-1);
+  $('f'+s.id).onchange=e=>e.target.files[0]&&upload(s.id,e.target.files[0]);
+ }
+ updateBadges();
+}
+function updateBadges(){
+ if(!PACK.length||!$('packSum'))return;
+ const have=haveParts();let min=0,clips=0,n=0;
+ for(const s of PACK){const ok=have.has(s.id);$('b'+s.id).innerHTML=ok?'<span class="badge good">recorded ✓</span>':'<span class="badge">not yet</span>';
+  if(ok){n++;min+=s.minutes;clips+=new Set(s.items.filter(i=>i.tag).map(i=>i.tag)).size}
+  if(ok&&$('a'+s.id).hidden){$('a'+s.id).src=bust(`/files/reference/${spk()}/parts/${s.id}.wav`);$('a'+s.id).hidden=false}
+  if(!ok&&!rec)$('a'+s.id).hidden=true}
+ const tot=PACK.reduce((a,s)=>a+s.minutes,0);
+ $('packSum').innerHTML=`<span class="badge ${n>=3?'good':'warn'}">${n} of ${PACK.length} parts recorded</span><span class="badge">~${min.toFixed(0)} of ${tot.toFixed(0)} min</span><span class="badge">${clips} labelled clips will be built</span>
+  <span class="mut"> Do A, B and C first (everything else builds on them), then as many of the others as you like. Each part is its own recording, so you can come back any day.</span>`;
+}
+function markLine(){
+ if(!rec)return;const s=PACK.find(x=>x.id===rec.p);
+ document.querySelectorAll(`#l${rec.p} .ln`).forEach(e=>e.classList.toggle('cur',+e.dataset.k===rec.cur));
+ const el=document.querySelector(`#l${rec.p} .ln[data-k="${rec.cur}"]`);if(el)el.scrollIntoView({block:'center',behavior:'smooth'});
+ $('nx'+rec.p).textContent=rec.cur>=s.items.length-1?'Last line ✓':'Next line ▶';
+}
+function nextLine(d){
+ if(!rec)return;const s=PACK.find(x=>x.id===rec.p),k=rec.cur+d;if(k<0||k>=s.items.length)return;
+ rec.cur=k;if(d>0)rec.marks[k]=rec.n/rec.sr;else rec.marks[k+1]=null;markLine();
+}
+addEventListener('keydown',e=>{if(rec&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)&&[' ','ArrowRight','Enter'].includes(e.key)){e.preventDefault();nextLine(1)}});
 async function startRec(p){
  if(rec)return;
  const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}});
  const ctx=new AudioContext({sampleRate:48000});
  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WK],{type:'text/javascript'})));
  const src=ctx.createMediaStreamSource(stream),node=new AudioWorkletNode(ctx,'rec'),mute=ctx.createGain();mute.gain.value=0;
- const chunks=[];const t0=Date.now();
- node.port.onmessage=e=>{chunks.push(e.data);let s=0;for(const v of e.data)s+=v*v;const db=20*Math.log10(Math.sqrt(s/e.data.length)+1e-9);
-  $('m'+p).style.width=Math.max(0,Math.min(100,(db+60)/60*100))+'%';$('m'+p).style.background=db>-6?'var(--err)':'var(--ok)';$('t'+p).textContent=((Date.now()-t0)/1000).toFixed(0)+'s'};
+ const chunks=[];
+ node.port.onmessage=e=>{chunks.push(e.data);rec.n+=e.data.length;let s=0;for(const v of e.data)s+=v*v;const db=20*Math.log10(Math.sqrt(s/e.data.length)+1e-9);
+  $('m'+p).style.width=Math.max(0,Math.min(100,(db+60)/60*100))+'%';$('m'+p).style.background=db>-6?'var(--err)':'var(--ok)';$('t'+p).textContent=Math.round(rec.n/rec.sr)+'s'};
  src.connect(node);node.connect(mute);mute.connect(ctx.destination);
- rec={p,stream,ctx,chunks};$('rb'+p).textContent='■ Stop';$('rb'+p).classList.add('rec');
+ rec={p,stream,ctx,chunks,n:0,sr:ctx.sampleRate,cur:0,marks:[0]};
+ $('rb'+p).textContent='■ Stop';$('rb'+p).classList.add('rec');$('nx'+p).disabled=$('bk'+p).disabled=false;$('sec'+p).open=true;markLine();
 }
 async function stopRec(){
- const {p,stream,ctx,chunks}=rec;rec=null;stream.getTracks().forEach(t=>t.stop());const sr=ctx.sampleRate;await ctx.close();
- $('rb'+p).textContent='● Record';$('rb'+p).classList.remove('rec');$('m'+p).style.width='0';
+ const {p,stream,ctx,chunks,sr,marks,cur}=rec;rec=null;stream.getTracks().forEach(t=>t.stop());await ctx.close();
+ $('rb'+p).textContent='● Record';$('rb'+p).classList.remove('rec');$('m'+p).style.width='0';$('nx'+p).disabled=$('bk'+p).disabled=true;
+ document.querySelectorAll(`#l${p} .ln`).forEach(e=>e.classList.remove('cur'));
  let n=0;chunks.forEach(c=>n+=c.length);const pcm=new Float32Array(n);let o=0;chunks.forEach(c=>{pcm.set(c,o);o+=c.length});
- await upload(p,wav(pcm,sr));
+ const items=PACK.find(x=>x.id===p).items.length;
+ const ok=await upload(p,wav(pcm,sr));
+ if(ok&&cur>0)try{await post(`/api/marks?speaker=${encodeURIComponent(spk())}&part=${p}`,{starts:Array.from({length:items},(_,k)=>marks[k]===undefined?null:marks[k])})}catch(e){}
 }
 function wav(pcm,sr){const b=new ArrayBuffer(44+pcm.length*4),v=new DataView(b),w=(o,s)=>[...s].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
  w(0,'RIFF');v.setUint32(4,36+pcm.length*4,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,3,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*4,true);v.setUint16(32,4,true);v.setUint16(34,32,true);
@@ -299,16 +334,10 @@ async function upload(p,blob){
   add('noise floor '+st.noise_floor_db+' dB',st.noise_floor_db>-45?'bad':st.noise_floor_db>-55?'warn':'good');
   add('SNR '+st.snr_db+' dB',st.snr_db<30?'warn':'good');add('speech '+st.speech_sec+' s','');if(st.clip_pct>0)add('CLIPPING','bad');
   $('s'+p).innerHTML=b.join('')+'<span class="badge good">saved ✓</span>';
- }catch(e){$('s'+p).innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}
+  const v=VOICES.find(x=>x.name===spk());if(v&&!v.parts.includes(p))v.parts.push(p);updateBadges();return true;
+ }catch(e){$('s'+p).innerHTML=`<span class="badge bad">${esc(e.message)}</span>`;return false}
 }
-$('parts').innerHTML=Object.entries(SCRIPT).map(([p,s])=>`<div class="part"><b>${s.title}</b><div class="script">${esc(s.text)}</div>
- <div class="row"><button id="rb${p}">● Record</button><div class="meter"><i id="m${p}"></i></div><span class="mut" id="t${p}"></span>
- <label class="k">or <input type="file" accept="audio/*" id="f${p}" style="width:auto;padding:4px"></label></div>
- <div id="s${p}" style="margin-top:6px"></div><audio id="a${p}" controls hidden></audio></div>`).join('');
-for(const p of Object.keys(SCRIPT)){
- $('rb'+p).onclick=async()=>{try{rec?(rec.p===p?await stopRec():alert('Stop the other recording first')):await startRec(p)}catch(e){$('s'+p).innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}};
- $('f'+p).onchange=e=>e.target.files[0]&&upload(p,e.target.files[0]);
-}
+api('/api/scripts').then(p=>{PACK=p;renderParts()}).catch(e=>{$('parts').textContent='could not load scripts: '+e.message});
 
 /* ---------- voices: enroll + intonation clips ---------- */
 $('enrollBtn').onclick=async()=>{
@@ -328,12 +357,12 @@ function clipTable(v){
  v.clips.map(c=>`<tr><td><span class="badge">@${esc(c.tag)}</span></td><td>${esc(c.label)}</td><td>${c.seconds} s</td><td>${esc(c.text)}</td><td><audio controls preload="none" style="width:220px" src="${bust('/files/reference/'+v.name+'/refs/'+c.tag+'.wav')}"></audio></td></tr>`).join('')+'</table></div>';
 }
 $('refsBtn').onclick=async()=>{
- $('refsBtn').disabled=true;$('refsOut').innerHTML='<span class="mut">Building clips (transcribing parts A, B and C with Whisper)…</span>';
+ $('refsBtn').disabled=true;$('refsOut').innerHTML='<span class="mut">Building clips (transcribing every recorded part with Whisper, then measuring cadence)…</span>';
  try{const v=await api(`/api/refs?speaker=${encodeURIComponent(spk())}`,{method:'POST'});$('refsOut').innerHTML=clipTable(v);loadVoices();
  }catch(e){$('refsOut').innerHTML=`<span class="badge bad">${esc(e.message)}</span>`}
  $('refsBtn').disabled=false;
 };
-$('spk').addEventListener('change',()=>{const v=VOICES.find(x=>x.name===spk());$('refsOut').innerHTML=v&&v.clips.length?clipTable(v):''});
+$('spk').addEventListener('change',()=>{updateBadges();const v=VOICES.find(x=>x.name===spk());$('refsOut').innerHTML=v&&v.clips.length?clipTable(v):''});
 
 /* ---------- library ---------- */
 let OUTS=[];

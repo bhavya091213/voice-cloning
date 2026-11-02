@@ -49,7 +49,7 @@ def _sha(b):
     return hashlib.sha256(b).hexdigest()
 
 
-def pack(refs_dir, out, name=None, config=None, rules=None, parts_dir=None):
+def pack(refs_dir, out, name=None, config=None, rules=None, parts_dir=None, cadence=None):
     """refs_dir holds <tag>.wav, <tag>.txt and index.json ({"clips": {tag: {text, seconds, label, source}}})."""
     refs_dir, out = Path(refs_dir), Path(out)
     idx = json.loads((refs_dir / "index.json").read_text(encoding="utf-8"))
@@ -78,6 +78,8 @@ def pack(refs_dir, out, name=None, config=None, rules=None, parts_dir=None):
         manifest = {"format": "vcref", "version": VERSION, "name": name or out.stem, "created": time.strftime("%Y-%m-%d"),
                     "default": idx.get("default") or ("neutral" if "neutral" in clips else next(iter(clips))),
                     "clips": clips, "rules": rules or [], "config": config or {}, "parts": parts}
+        if cadence:
+            manifest["cadence"] = cadence  # optional, see cadence.py; readers that predate it ignore the key
         z.writestr("manifest.json", json.dumps(manifest, indent=1, ensure_ascii=False))
     tmp.replace(out)
     return out
@@ -101,6 +103,7 @@ class Bundle:
     default = property(lambda s: s.manifest["default"])
     config = property(lambda s: s.manifest.get("config", {}))
     tags = property(lambda s: list(s.manifest["clips"]))
+    cadence = property(lambda s: s.manifest.get("cadence"))
 
     @property
     def id(self):
@@ -158,6 +161,24 @@ class Bundle:
             (out_dir / f"{tag}.wav").write_bytes(c.wav.read_bytes())
             (out_dir / f"{tag}.txt").write_text(c.text, encoding="utf-8")
         return out_dir
+
+
+def set_cadence(path, cadence):
+    """Write/replace the cadence block of an existing bundle (audio entries are copied untouched)."""
+    path = Path(path)
+    b = Bundle(path)
+    m = dict(b.manifest)
+    m["cadence"] = cadence
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
+        z.comment = MAGIC
+        for n in b._z.namelist():
+            if n != "manifest.json":
+                z.writestr(n, b._z.read(n))
+        z.writestr("manifest.json", json.dumps(m, indent=1, ensure_ascii=False))
+    b._z.close()
+    tmp.replace(path)
+    return path
 
 
 def _cli():

@@ -155,8 +155,10 @@ def cmd_refs(a):
     if r.returncode:
         p_set(3, "error", r.stderr.strip()[-300:])
         sys.exit(r.stderr.strip()[-600:] or 1)
+    import cadence
+    p_set(3, "running", "measuring cadence (rate, pauses, pitch) of each clip")
     out_file = vcref.pack(sp / "refs", ROOT / "voices" / f"{d['speaker']}.vcref", name=d["speaker"], config=d["config"],
-                          parts_dir=(sp / "parts") if a.parts else None)
+                          parts_dir=(sp / "parts") if a.parts else None, cadence=cadence.from_refs(sp / "refs"))
     n = len(json.loads((sp / "refs" / "index.json").read_text(encoding="utf-8"))["clips"])
     p_set(3, "done", f"{n} intonation clips -> {out_file.name}")
     print(r.stderr.strip())
@@ -172,7 +174,7 @@ def cmd_generate(a):
            "--engine", c["engine"], "--style", c["style"], "--denoise", str(c["denoise"]), "--lufs", str(c["lufs"])] + (["--timed"] if a.timed else []) \
           + (["--ref-tag", a.ref_tag] if a.ref_tag else []) + (["--cfg", str(a.cfg)] if a.cfg is not None else []) \
           + (["--no-master"] if a.no_master else []) + (["--title", a.title] if a.title else []) + (["--stack"] if a.stack else []) \
-          + (["--vcref", a.vcref or str(ROOT / "voices" / f"{d['speaker']}.vcref")] if (a.vcref or a.multi) else [])
+          + (["--vcref", a.vcref or str(ROOT / "voices" / f"{d['speaker']}.vcref")] if (a.vcref or a.multi) else [])           + sum(([f"--{k.replace('_', '-')}", str(getattr(a, k))] for k in ("pace_from", "pace", "pace_w", "pause_scale", "f_range") if getattr(a, k) is not None), [])
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     wav = ROOT / "output" / f"{a.job}.wav"
     p_set(6, "done" if wav.exists() else "error", str(wav) if wav.exists() else (r.stderr.strip()[-300:] or "see work/pipeline.log"))
@@ -234,6 +236,9 @@ def cmd_doctor(a):
                                capture_output=True, text=True, timeout=120)
             line = (r.stdout.strip().splitlines() or ["?"])[-1]
             add("gpu", "GPU (MPS)" if IS_MAC else "GPU (ROCm torch)", (" True " in f" {line} ") or "mps" in line, line, "reinstall torch (macOS: pip install torch torchaudio; Windows: AMD gfx103X ROCm index)")
+    if IS_MAC:
+        r = subprocess.run([PY, "-I", "-c", "import importlib.util as u;print(u.find_spec('mlx_audio') is not None)"], capture_output=True, text=True)
+        add("mlx", "mlx-audio (optional MLX engine)", "True" in r.stdout, "", f"{PY} -m pip install mlx-audio")
     for lib, mod in (("libs_qwen", "qwen_tts"), ("libs_vox", "voxcpm"), ("libs_llm", "transformers")):
         add("lib-" + lib, f"{lib}/{mod}", (ROOT / lib / mod).exists(), str(ROOT / lib), f"pip install --target {ROOT / lib} <pkg>")
     add("ffmpeg", "ffmpeg on PATH", shutil.which("ffmpeg"), shutil.which("ffmpeg") or "", "brew install ffmpeg" if IS_MAC else "winget install ffmpeg")
@@ -282,7 +287,7 @@ pp.add_argument("name", nargs="?")
 pp.add_argument("--speaker")
 pp.add_argument("--audio", nargs="+")
 pp.add_argument("--preset")
-pp.add_argument("--engine", choices=["qwen", "voxcpm"])
+pp.add_argument("--engine", choices=["qwen", "voxcpm", "mlx"])
 pp.add_argument("--style")
 pp.add_argument("--lufs", type=float)
 pp.add_argument("--denoise", type=float)
@@ -307,7 +312,12 @@ pg.add_argument("--cfg", type=float, help="VoxCPM guidance, default 2.0; lower =
 pg.add_argument("--no-master", action="store_true", help="skip mastering (raw output)")
 pg.add_argument("--stack", action="store_true", help="prompt = neutral clip + the tag's clip (voice anchored on neutral)")
 pg.add_argument("--title", default="", help="name shown in the Studio library")
-pg.add_argument("--engine", choices=["qwen", "voxcpm"])
+pg.add_argument("--pace-from", help="a .vcref whose cadence (rate by sentence kind, pauses) sets the pacing, e.g. the original speaker's")
+pg.add_argument("--pace", type=float, help="cadence pacing: 1.0 = measured cadence, <1 slower")
+pg.add_argument("--pace-w", type=float, help="weight of the pace source vs the voice's own clip rate (0-1, default 0.5)")
+pg.add_argument("--pause-scale", type=float, help="scale the measured pauses (default 1.0)")
+pg.add_argument("--f-range", help="allowed speed correction lo,hi (default 0.85,1.15)")
+pg.add_argument("--engine", choices=["qwen", "voxcpm", "mlx"])
 pg.add_argument("--style")
 pg.add_argument("--lufs", type=float)
 pg.add_argument("--denoise", type=float)

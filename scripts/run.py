@@ -22,12 +22,17 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--speaker", required=True)
 ap.add_argument("--text-file", required=True)
 ap.add_argument("--job", required=True)
-ap.add_argument("--engine", choices=["qwen", "voxcpm"], default="voxcpm")
+ap.add_argument("--engine", choices=["qwen", "voxcpm", "mlx"], default="voxcpm")
 ap.add_argument("--style", default="")
 ap.add_argument("--ref-tag", default="", help="use reference/<speaker>/ref_<tag>.wav/.txt (made by enroll.py --tag)")
 ap.add_argument("--cfg", type=float, default=None, help="VoxCPM guidance (default 2.0; lower = more varied)")
 ap.add_argument("--vcref", default="", help="voice bundle (.vcref): regex-split the text into takes, each with its own intonation clip")
 ap.add_argument("--stack", action="store_true", help="with --vcref: prompt = neutral clip + the tag's clip")
+ap.add_argument("--pace-from", default="", help="cadence pacing: .vcref whose cadence sets rate and pauses (see cadence.py)")
+ap.add_argument("--pace", type=float, default=None)
+ap.add_argument("--pace-w", type=float, default=None)
+ap.add_argument("--pause-scale", type=float, default=None)
+ap.add_argument("--f-range", default="")
 ap.add_argument("--no-master", action="store_true", help="skip mastering; output is the raw synthesis")
 ap.add_argument("--title", default="", help="display name for the Studio library")
 ap.add_argument("--timed", action="store_true", help="text-file has `m:ss - m:ss  line` timestamps; fit each line to its slot (voxcpm)")
@@ -39,10 +44,10 @@ jd = ROOT / "work" / "jobs" / a.job
 jd.mkdir(parents=True, exist_ok=True)
 import re  # noqa: E402
 _txt = Path(a.text_file).read_text(encoding="utf-8-sig")
-if a.engine == "qwen":  # Qwen3-TTS Base has no delivery control: drop the (instruction) prefixes
+if a.engine in ("qwen", "mlx"):  # Qwen3-TTS Base has no delivery control: drop the (instruction) prefixes
     _txt = chr(10).join(re.sub(r"^\s*\([^()]{1,120}\)\s*", "", ln) for ln in _txt.splitlines())
 (jd / "text.txt").write_text(_txt, encoding="utf-8")
-ENGINES = {"qwen": ("Qwen3-TTS 1.7B (24 kHz)", "qwen_synth.py"), "voxcpm": ("VoxCPM2 (48 kHz)", "vox_synth.py")}
+ENGINES = {"qwen": ("Qwen3-TTS 1.7B (24 kHz)", "qwen_synth.py"), "mlx": ("MLX Qwen3-TTS (Apple Silicon)", "mlx_synth.py"), "voxcpm": ("VoxCPM2 (48 kHz)", "vox_synth.py")}
 if a.timed:
     if a.engine != "voxcpm":
         raise SystemExit("--timed needs --engine voxcpm")
@@ -50,7 +55,8 @@ if a.timed:
 meta = {"job": a.job, "speaker": a.speaker, "engine": ENGINES[a.engine][0], "style": a.style, "state": "running", "timings": {},
         "title": a.title,
         "options": {"multi": bool(a.vcref), "timed": a.timed, "master": not a.no_master, "cfg": a.cfg, "ref_tag": a.ref_tag,
-                    "vcref": Path(a.vcref).name if a.vcref else ""}}
+                    "vcref": Path(a.vcref).name if a.vcref else "",
+                    "pace_from": Path(a.pace_from).name if a.pace_from else "", "pace": a.pace, "pause_scale": a.pause_scale}}
 
 
 def save(**kw):
@@ -67,6 +73,10 @@ try:
         raise RuntimeError("speaker not enrolled")
     if a.cfg is not None:
         ENV["VOICECLONE_CFG"] = str(a.cfg)
+    for k, v in (("PACE_FROM", a.pace_from and str(Path(a.pace_from).resolve())), ("PACE", a.pace), ("PACE_W", a.pace_w),
+                 ("PAUSE_SCALE", a.pause_scale), ("F_RANGE", a.f_range)):
+        if v not in (None, ""):
+            ENV["VOICECLONE_" + k] = str(v)
     if a.vcref:
         if a.engine != "voxcpm":
             raise RuntimeError("--vcref needs --engine voxcpm")

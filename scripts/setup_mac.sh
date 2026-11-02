@@ -26,6 +26,7 @@ PY="$ROOT/.venv/bin/python"
 echo "==> torch (MPS) + dependencies"
 "$PY" -m pip install torch torchaudio
 "$PY" -m pip install -r requirements.txt
+"$PY" -m pip install mlx-audio || echo "mlx-audio not installed (optional MLX engine: run.py --engine mlx)"
 
 echo "==> TTS packages (isolated folders, no dependency resolution)"
 [[ -d libs_qwen/qwen_tts ]] || "$PY" -m pip install --no-deps --target libs_qwen qwen-tts==0.1.1 transformers==4.57.3 tokenizers==0.22.2

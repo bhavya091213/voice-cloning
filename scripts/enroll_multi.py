@@ -3,6 +3,9 @@ Build one reference clip per intonation from the enrollment parts already record
   A (neutral narration)  -> neutral   best sentence-aligned ~20 s window
   B (six acted lines)    -> excited, warm, serious, sad, annoyed, playful   one clip per acted line
   C (short utterances)   -> question  the span covering the questions
+Sections D and later (scripts/script_pack.py: emotions, questions, conversation, explainer, story, ads, pacing, ...) are cut
+per item: with the recorder's line marks (parts/<id>.marks.json) when present, otherwise by aligning Whisper's words to the
+script. Consecutive items sharing a tag become one clip.
 Writes reference/<speaker>/refs/<tag>.wav|txt + index.json. Never touches parts/ or the existing ref.wav.
 Transcripts come from Whisper (what was actually said), labels from the recording script.
 """
@@ -16,6 +19,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).parent))
 import paths  # noqa: E402
+import script_pack  # noqa: E402
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 import whisper  # noqa: E402
@@ -81,11 +85,94 @@ def neutral_window(sents, target=20.0):
     return best
 
 
+clips = {}
+
+
+def clean_script(t):
+    return re.sub(r"\s+", " ", t.replace("*", "").replace("...", ",")).strip(" ,") 
+
+
+def locate_items(heard, items):
+    """Align Whisper's words (`heard`, with times) to the script items read in order.
+    Returns {item_index: (first_word_idx, last_word_idx)} for items at least half recognised."""
+    hn = [norm(w["word"]) for w in heard]
+    tn, owner = [], []
+    for k, it in enumerate(items):
+        for t in norm_words(it.text):
+            tn.append(t); owner.append(k)
+    found = {}
+    for blk in difflib.SequenceMatcher(None, hn, tn, autojunk=False).get_matching_blocks():
+        for o in range(blk.size):
+            found.setdefault(owner[blk.b + o], []).append(blk.a + o)
+    need = {k: len(norm_words(it.text)) for k, it in enumerate(items)}
+    return {k: (min(ix), max(ix)) for k, ix in found.items() if len(ix) >= 0.5 * need[k]}
+
+
+def spans_from_marks(heard, marks, n):
+    """marks[k] = seconds into the recording at which the speaker pressed Next to begin item k (marks[0] = 0). The press
+    lands near the silence between two lines, so each boundary snaps to the widest gap between words around it.
+    Returns {item: (first_idx, last_idx)}."""
+    edges = [0.0]
+    for k in range(1, n):
+        m = marks[k] if k < len(marks) and marks[k] is not None else None
+        if m is None:
+            edges.append(edges[-1])
+            continue
+        gaps = [(heard[i + 1]["start"] - heard[i]["end"], i) for i in range(len(heard) - 1)
+                if m - 1.2 <= (heard[i]["end"] + heard[i + 1]["start"]) / 2 <= m + 0.6]
+        if gaps:
+            _, i = max(gaps)
+            m = (heard[i]["end"] + heard[i + 1]["start"]) / 2
+        edges.append(max(m, edges[-1]))
+    edges.append(1e9)
+    out = {}
+    for k in range(n):
+        ix = [i for i, w in enumerate(heard) if edges[k] <= w["start"] < edges[k + 1]]
+        if ix:
+            out[k] = (ix[0], ix[-1])
+    return out
+
+
+def build_pack(model, d, save, skipped):
+    for sec in script_pack.SECTIONS:
+        if sec.legacy:
+            continue
+        p = d / "parts" / f"{sec.id}.wav"
+        if not p.exists():
+            continue
+        x, sr = sf.read(p, dtype="float32")
+        heard = words_of(model, p)
+        mk = d / "parts" / f"{sec.id}.marks.json"
+        marks = json.loads(mk.read_text(encoding="utf-8")).get("starts") if mk.exists() else None
+        spans = spans_from_marks(heard, marks, len(sec.items)) if marks else locate_items(heard, sec.items)
+        for tag, ks in script_pack.clip_groups(sec):
+            have = [k for k in ks if k in spans]
+            if len(have) < len(ks):
+                skipped.append(f"{tag}: {len(ks) - len(have)}/{len(ks)} lines not found in {sec.id}")
+            if not have:
+                continue
+            a, b = spans[have[0]][0], spans[have[-1]][1]
+            ws = heard[a:b + 1]
+            prev_end = heard[a - 1]["end"] if a else 0.0
+            nxt = heard[b + 1]["start"] if b + 1 < len(heard) else None
+            hs = text_of(ws)
+            sc = clean_script(" ".join(sec.items[k].text for k in have))
+            sim = difflib.SequenceMatcher(None, norm_words(hs), norm_words(sc)).ratio()
+            text = sc if sim >= 0.85 else hs
+            clip = cut(x, sr, ws[0]["start"], ws[-1]["end"], prev_end, nxt)
+            if len(clip) / sr < 1.5:
+                skipped.append(f"{tag}: too short ({len(clip) / sr:.1f} s)")
+                continue
+            save(tag, sec.items[have[0]].direction or sec.title, sec.id, clip, sr, text)
+            clips[tag]["section"] = sec.title
+
+
 def main(spk):
     d = paths.REFERENCE / spk
     out = d / "refs"
     out.mkdir(exist_ok=True)
     model = whisper.load_model("small", download_root=str(paths.MODELS / "whisper"))
+    global clips
     clips, skipped = {}, []
 
     def save(tag, label, source, clip, sr, text):
@@ -159,6 +246,8 @@ def main(spk):
             save("question", "Questions (short)", "C", cut(x, sr, ws[0]["start"], ws[-1]["end"], prev_end, nxt), sr, text_of(ws))
         else:
             skipped.append("question: no '?' found in C")
+
+    build_pack(model, d, save, skipped)
 
     if not clips:
         raise SystemExit("no clips could be built")

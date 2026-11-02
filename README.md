@@ -1,7 +1,7 @@
 ﻿# VoiceClone
 
 Fully local voice-cloning TTS with a mastering chain, a browser Studio UI, a live pipeline dashboard, and agent skills (Claude Code and Codex) that run the whole workflow in phases.
-Built and tested on Windows 11 with an AMD RX 6900 XT (ROCm PyTorch); macOS Apple Silicon (MPS) is supported but untested. Everything runs on your own machine; no audio leaves it.
+Built and tested on Windows 11 with an AMD RX 6900 XT (ROCm PyTorch); macOS Apple Silicon (PyTorch MPS, plus an optional MLX engine) is supported but untested. Everything runs on your own machine; no audio leaves it.
 
 ## Contents
 
@@ -51,7 +51,7 @@ Supported platforms:
 | Platform | Backend | Status |
 |---|---|---|
 | Windows 11 + AMD GPU | ROCm PyTorch (CUDA also works) | developed and tested here |
-| macOS, Apple Silicon (M1 or later) | PyTorch MPS | supported, **untested** (written without a Mac to run it on) |
+| macOS, Apple Silicon (M1 or later) | PyTorch MPS; optional MLX (`--engine mlx`) | supported, **untested** (written without a Mac to run it on) |
 
 All scripts find the repo from their own location (override with `VOICECLONE_ROOT`) and pick the device automatically (`cuda` > `mps` > `cpu`, override with `VOICECLONE_DEVICE`; `VOICECLONE_DTYPE` overrides the dtype, default bfloat16 on GPU).
 
@@ -75,6 +75,8 @@ bash scripts/setup_mac.sh
 ```
 
 The script installs Python 3.11, ffmpeg and cloudflared with Homebrew, creates `.venv`, installs PyTorch (MPS) and `requirements.txt`, installs the two TTS packages into `libs_qwen` / `libs_vox`, downloads the weights from Hugging Face (`openbmb/VoxCPM2`, `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, `Qwen/Qwen3-TTS-Tokenizer-12Hz`, about 15 GB), then runs the doctor. Run commands with `.venv/bin/python` instead of `.venv\Scripts\python.exe`.
+
+MLX engine (optional, Apple Silicon only): `setup_mac.sh` also installs `mlx-audio`; run `run.py --engine mlx` (or pick it in the Studio engine menu) to clone with Qwen3-TTS through MLX instead of PyTorch. Set `VOICECLONE_MLX_MODEL` to use another mlx-audio model. VoxCPM2, `.vcref` multi-clip takes and timed scripts stay on PyTorch/MPS, since mlx-audio has no VoxCPM2 backend. Untested on real hardware.
 
 Mac notes: unsupported MPS ops fall back to CPU (`PYTORCH_ENABLE_MPS_FALLBACK=1`, set for you); `torch.compile` is turned off for VoxCPM2 on Mac; generation will be slower than a discrete GPU; the live dashboard shows RAM but no GPU stats.
 

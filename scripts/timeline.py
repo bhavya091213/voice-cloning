@@ -18,6 +18,7 @@ import numpy as np
 import soundfile as sf
 
 FRAME = 0.01
+NOISE_AWARE = False  # set by timed_synth in cadence mode
 MARK = re.compile(r"(?:^|\s)@[a-z][a-z0-9_-]{0,23}(?=\s|$)")
 
 
@@ -53,7 +54,10 @@ def speech_mask(x, sr, rel_db=-38.0):
     """Frames that count as speech: within rel_db of the take's loud frames (90th percentile). Silent holes of two
     frames or less inside speech (a stop consonant) are filled so a word is not split."""
     db = frame_db(x, sr)
-    m = db > np.percentile(db, 90) + rel_db
+    floor = np.percentile(db, 90) + rel_db
+    if NOISE_AWARE:  # a voice cloned from a room recording carries its noise floor; silence is then well above -38 dB
+        floor = max(floor, np.percentile(db, 10) + 8.0)
+    m = db > floor
     for a, b, v in _runs(m):
         if not v and b - a <= 2 and a > 0 and b < len(m):
             m[a:b] = True

@@ -31,6 +31,7 @@ import paths  # noqa: E402
 ROOT = paths.ROOT
 import stats as dash  # noqa: E402  (snapshot() + gpu_loop())
 import clean  # noqa: E402
+import script_pack  # noqa: E402  (recording scripts: sections, items, clip tags)
 import director  # noqa: E402  (TAGS only; the LLM runs in a subprocess)
 import soundfile as sf  # noqa: E402
 
@@ -45,7 +46,7 @@ FFMPEG = shutil.which("ffmpeg") or next(iter(glob.glob(
 MAX_BODY = 200 * 1024 * 1024
 NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 FILE_RE = re.compile(r"^(reference/[a-z0-9_-]+/(raw|clean|ref|ref_[a-z0-9_]+|prompt_15s|prompt_expressive)\.wav|"
-                     r"reference/[a-z0-9_-]+/parts/[ABC]\.wav|reference/[a-z0-9_-]+/refs/[a-z0-9_-]+\.wav|"
+                     r"reference/[a-z0-9_-]+/parts/[A-Z]\.wav|reference/[a-z0-9_-]+/refs/[a-z0-9_-]+\.wav|"
                      r"work/jobs/job_[a-z0-9_]+/(raw|master)\.wav|output/[A-Za-z0-9_.-]+\.wav)$")
 TIMED_LINE = re.compile(r"^\s*\d+:\d{1,2}(?:\.\d+)?\s*-\s*\d+:\d{1,2}(?:\.\d+)?\s+\S")
 TEST_RE = re.compile(r"(test|regress|demo)", re.I)
@@ -105,7 +106,7 @@ def voices():
         pname, prof = profile_for(d.name)
         idx = read_json(d / "refs" / "index.json", {}) or {}
         bundle = ROOT / "voices" / f"{d.name}.vcref"
-        out.append({"name": d.name, "parts": [p for p in "ABC" if (d / "parts" / f"{p}.wav").exists()],
+        out.append({"name": d.name, "parts": [p for p in script_pack.IDS if (d / "parts" / f"{p}.wav").exists()],
                     "enrolled": (d / "ref.wav").exists(),
                     "ref_long": (d / "ref_long.wav").exists(),
                     "clips": [{"tag": t, "seconds": m.get("seconds"), "label": m.get("label", ""), "text": m.get("text", "")}
@@ -205,6 +206,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, dash.snapshot())
         if path == "/api/voices":
             return self._send(200, voices())
+        if path == "/api/scripts":
+            return self._send(200, script_pack.as_dict())
         if path == "/api/presets":
             return self._send(200, {"presets": presets(), "tags": director.TAGS})
         if path == "/api/outputs":
@@ -250,6 +253,8 @@ class H(BaseHTTPRequestHandler):
             body = self._body()
             if path == "/api/part":
                 return self._send(200, self._part(q, body))
+            if path == "/api/marks":
+                return self._send(200, self._marks(q, body))
             if path == "/api/enroll":
                 return self._send(200, self._enroll(self._spk(q.get("speaker", ""))))
             if path == "/api/refs":
@@ -275,10 +280,14 @@ class H(BaseHTTPRequestHandler):
 
     def _part(self, q, body):
         spk, part = self._spk(q.get("speaker", "")), q.get("part", "")
-        if part not in ("A", "B", "C") or not body:
+        if part not in script_pack.IDS or not body:
             raise ValueError("bad part/body")
         d = ROOT / "reference" / spk / "parts"
         d.mkdir(parents=True, exist_ok=True)
+        if (d / f"{part}.wav").exists():  # a re-record never destroys the earlier take
+            (d / "_old").mkdir(exist_ok=True)
+            (d / f"{part}.wav").replace(d / "_old" / f"{part}_{time.strftime('%Y%m%d-%H%M%S')}.wav")
+        (d / f"{part}.marks.json").unlink(missing_ok=True)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".in", dir=ROOT / "work") as f:
             f.write(body)
         try:
@@ -290,6 +299,19 @@ class H(BaseHTTPRequestHandler):
             raise ValueError("could not decode audio: " + r.stderr[-200:])
         x, sr = sf.read(d / f"{part}.wav", dtype="float32")
         return clean.part_stats(x, sr)
+
+    def _marks(self, q, body):
+        """The recorder's line marks: seconds into the recording at which each script line was started (null = skipped)."""
+        spk, part = self._spk(q.get("speaker", "")), q.get("part", "")
+        if part not in script_pack.IDS:
+            raise ValueError("bad part")
+        starts = json.loads(body).get("starts")
+        if not isinstance(starts, list) or len(starts) > 500 or not all(t is None or isinstance(t, (int, float)) for t in starts):
+            raise ValueError("starts must be a list of seconds")
+        d = ROOT / "reference" / spk / "parts"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{part}.marks.json").write_text(json.dumps({"starts": starts}), encoding="utf-8")
+        return {"saved": len([t for t in starts if t is not None])}
 
     def _enroll(self, spk):
         p = subprocess.run([PY, "-W", "ignore", str(ROOT / "scripts" / "enroll.py"), spk], capture_output=True,
@@ -362,7 +384,7 @@ class H(BaseHTTPRequestHandler):
             raise ValueError("text must be 1-20000 chars")
         if not (ROOT / "reference" / spk / "ref.wav").exists():
             raise ValueError("speaker not enrolled yet")
-        engine = "qwen" if req.get("engine") == "qwen" else "voxcpm"
+        engine = req.get("engine") if req.get("engine") in ("qwen", "mlx") else "voxcpm"
         timed = bool(req.get("timed")) or sum(bool(TIMED_LINE.match(ln)) for ln in text.splitlines()) >= 2
         multi = bool(req.get("multi"))
         if (timed or multi) and engine != "voxcpm":

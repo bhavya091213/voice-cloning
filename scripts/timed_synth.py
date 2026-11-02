@@ -27,6 +27,7 @@ import rocm_shim  # noqa: F401,E402
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 import status  # noqa: E402
+import cadence as cad  # noqa: E402
 import takes  # noqa: E402
 import timeline as tl  # noqa: E402
 import vcref  # noqa: E402
@@ -40,6 +41,12 @@ CFG = float(os.environ.get("VOICECLONE_CFG", 2.0))  # lower = looser, more varie
 MAX_TAKES = int(os.environ.get("VOICECLONE_TAKES", 3))
 MIN_ASR = 0.92       # fraction of the script's words Whisper must hear (in order) for a take to count as faithful
 TAIL_GAP = 0.25      # the silence we aim to leave after a sentence when choosing how long its speech should be
+# cadence pacing (needs a .vcref that carries cadence, see cadence.py): speak at the rate and with the pauses the voice
+# really has, instead of squeezing every sentence into its slot; later sentences slide instead.
+PACE = float(os.environ.get("VOICECLONE_PACE", 1.0))            # >1 faster, <1 slower than the measured cadence
+PACE_W = float(os.environ.get("VOICECLONE_PACE_W", 0.5))        # weight of the pace source vs the voice's own clip rate
+PAUSE_SCALE = float(os.environ.get("VOICECLONE_PAUSE_SCALE", 1.0))
+F_LO, F_HI = (float(v) for v in os.environ.get("VOICECLONE_F_RANGE", "0.85,1.15").split(","))
 MAX_GAIN_DB = 12.0
 FADE = 0.015
 
@@ -63,6 +70,31 @@ def main(script, ref_wav, ref_txt, out):
     bundle = vcref.Bundle(os.environ["VOICECLONE_VCREF"]) if os.environ.get("VOICECLONE_VCREF") else None
     if bundle:
         bundle.verify()
+    own_cad = bundle.cadence if bundle else None
+    pace_src = os.environ.get("VOICECLONE_PACE_FROM")
+    pace_cad = vcref.Bundle(pace_src).cadence if pace_src else own_cad
+    CAD = bool(pace_cad)
+    tl.NOISE_AWARE = CAD
+    if CAD:
+        print(f"cadence pacing on: pace {PACE} weight {PACE_W} pauses x{PAUSE_SCALE} speed {F_LO}-{F_HI}"
+              f" from {Path(pace_src).name if pace_src else 'own bundle'}", flush=True)
+
+    def target_artic(tag, section):
+        """Syllables/s we want while speaking: the voice's own rate for this emotion clip blended with the pace
+        source's rate for this kind of sentence (geometric mean, weight PACE_W), times PACE."""
+        own = ((own_cad or {}).get("tags") or {}).get(tag)
+        sec = ((pace_cad or {}).get("sections") or {}).get(section) or (pace_cad or {}).get("global")
+        a, b = (own or {}).get("artic"), (sec or {}).get("artic")
+        if a and b:
+            t = a ** (1 - PACE_W) * b ** PACE_W
+        else:
+            t = a or b
+        return t * PACE if t else None
+
+    gp = (pace_cad or {}).get("global") or {}
+    comma_p = (gp.get("pauses", {}).get("comma") or {}).get("med", 0.3) * PAUSE_SCALE
+    gap_min = ((gp.get("sentence_gap") or {}).get("p25", 0.5)) * PAUSE_SCALE
+    last_end = 0.0   # where the previous sentence stopped speaking (cadence layout)
     status.stage("Synthesize", "running", "loading VoxCPM2")
     extra = {"device": paths.device(), "optimize": False} if paths.IS_MAC else {}
     model = VoxCPM.from_pretrained(MODEL, load_denoiser=False, **extra)
@@ -111,11 +143,14 @@ def main(script, ref_wav, ref_txt, out):
         for _ in range(MAX_TAKES):
             a, used = say(" ".join(texts))
             a = tl.trim(a, sr)
-            a, removed = tl.collapse_pauses(a, sr)
+            if CAD:  # keep pauses that sound like the voice's own; only cut the ones that are clearly dead air
+                a, removed = tl.collapse_pauses(a, sr, max_pause=max(0.4, 1.5 * comma_p), keep=max(0.2, comma_p))
+            else:
+                a, removed = tl.collapse_pauses(a, sr)
             heard = heard_words(a)
             firsts, ratio = tl.align_boundaries(heard, words) if heard is not None else ([None] * len(g), 1.0)
             D = len(a) / sr
-            cands.append({"a": a, "used": used, "firsts": firsts, "ratio": ratio, "D": D, "removed": removed,
+            cands.append({"a": a, "used": used, "firsts": firsts, "ratio": ratio, "D": D, "removed": removed, "heard": heard,
                           "score": 12 * (1 - ratio) + abs(math.log(max(D, 0.1) / goal))})
             if ratio >= MIN_ASR and 0.88 <= D / goal <= 1.2:
                 break
@@ -146,8 +181,28 @@ def main(script, ref_wav, ref_txt, out):
         starts = [r["start"] for r in g]
 
         end = E
-        pl = tl.plan(durs, nats, starts, end)
-        if pl["over"] > 0.02:  # let it spill into the quiet before the next sentence
+        if CAD:
+            sect = cad.classify_text(" ".join(texts), gi, len(groups))
+            gtag = c["used"][0] if c["used"] and c["used"][0] != "-" else (bundle.default if bundle else None)
+            tgt = target_artic(gtag, sect)
+            try:  # measure the take exactly as the reference was measured (same pause rules), so the rates compare
+                hw = c["heard"]
+                have = cad.measure(a, sr, [(w_, s_, e_) for w_, s_, e_ in hw], with_f0=False)["artic"]
+            except Exception:
+                m_ = cad._mask(a, sr)
+                quiet = sum((b_ - a_) * tl.FRAME for a_, b_, v_ in tl._runs(m_) if not v_ and (b_ - a_) * tl.FRAME >= cad.PAUSE_MIN)
+                have = cad.syllables(" ".join(texts)) / max(0.5, D - quiet)
+            f = float(np.clip(tgt / have, F_LO, F_HI)) if tgt else 1.0
+            flags.append(f"{sect}: {have:.1f} -> {tgt:.1f} syl/s" if tgt else f"{sect}: no target")
+            first = max(S, last_end + gap_min)
+            p = [first]
+            for k in range(1, n):
+                p.append(p[-1] + durs[k - 1] / f + float(np.clip(nats[k] / f, 0.6 * comma_p, 1.8 * comma_p)))
+            pl = {"f": round(f, 3), "starts": p, "over": 0.0}
+            end = p[-1] + durs[-1] / f + 5.0   # no cutting in cadence layout
+        else:
+            pl = tl.plan(durs, nats, starts, end)
+        if not CAD and pl["over"] > 0.02:  # let it spill into the quiet before the next sentence
             nxt = groups[gi + 1][0]["start"] if gi + 1 < len(groups) else total
             if nxt - 0.15 > E:
                 end = nxt - 0.15
@@ -169,6 +224,7 @@ def main(script, ref_wav, ref_txt, out):
             segs[-1] = segs[-1][:max(keep, int(0.2 * sr))]
             flags.append(f"OVERRUN cut {prev_end - end:.1f}s from the end")
         placed.append({"segs": list(zip(pos, segs)), "db": tl.active_db(np.concatenate(segs), sr)})
+        last_end = prev_end
 
         for k, r in enumerate(g):
             r.update(natural=round(durs[k], 2), final=round(len(segs[k]) / sr, 2), slot=round(r["end"] - r["start"], 2),
@@ -180,6 +236,7 @@ def main(script, ref_wav, ref_txt, out):
 
     # level every sentence to the median speech loudness, then mix with short fades
     target = float(np.median([p["db"] for p in placed]))
+    total = max([total] + [p0 + len(s0) / sr + 0.4 for pl_ in placed for p0, s0 in pl_["segs"]])
     timeline = np.zeros(int(round(total * sr)) + sr, np.float32)
     for gi, p in enumerate(placed):
         gain_db = float(np.clip(target - p["db"], -MAX_GAIN_DB, MAX_GAIN_DB))
