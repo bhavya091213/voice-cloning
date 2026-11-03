@@ -377,13 +377,22 @@ function renderLibrary(){
  for(const o of rows){
   const d=new Date(o.mtime*1000),ds=d.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
   if(ds!==day){day=ds;html+=`<div class="day">${esc(ds)}</div>`}
+  const url='/files/output/'+encodeURIComponent(o.file);
+  if(o.video){
+   html+=`<div class="item"><div class="row"><b>${esc(o.title)}</b><span class="mut">${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span></div>
+   <div><span class="badge">video</span>${o.preview?'<span class="badge warn">compressed preview</span>':'<span class="badge good">full quality</span>'}
+   <span class="badge">${o.seconds?mmss(o.seconds):'?'}</span><span class="badge">${o.mb} MB</span></div>
+   <div style="margin:8px 0"><a href="${url}?dl=1" download style="display:inline-block;padding:9px 16px;border-radius:10px;background:#1b8cf0;color:#fff;text-decoration:none;font-weight:600">Download ${o.preview?'preview':'full quality'} (${o.mb} MB)</a></div>
+   <video controls preload="metadata" playsinline style="width:100%;max-width:720px;border-radius:12px;background:#000" src="${url}"></video></div>`;
+   continue;
+  }
   html+=`<div class="item"><div class="row"><b>${esc(o.title)}</b><span class="mut">${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span></div>
   <div>${o.speaker?`<span class="badge">${esc(o.speaker)}</span>`:''}${o.engine?`<span class="badge">${esc(o.engine)}</span>`:''}
   <span class="badge ${o.raw?'warn':'good'}">${o.raw?'raw':'mastered'}</span>${o.multi?'<span class="badge">intonation clips</span>':''}${o.timed?'<span class="badge">timed</span>':''}
   ${o.cfg?`<span class="badge">looseness ${o.cfg}</span>`:''}${o.lufs!==undefined&&o.lufs!==null?`<span class="badge">${o.lufs} LUFS</span>`:''}
   <span class="badge">${o.seconds?mmss(o.seconds):'?'}</span><span class="badge">${o.mb} MB</span>${o.sr?`<span class="badge">${o.sr/1000} kHz</span>`:''}
-  <a href="/files/output/${encodeURIComponent(o.file)}?dl=1" style="margin-left:6px">download</a></div>
-  <audio controls preload="none" src="/files/output/${encodeURIComponent(o.file)}"></audio></div>`;
+  <a href="${url}?dl=1" style="margin-left:6px">download</a></div>
+  <audio controls preload="none" src="${url}"></audio></div>`;
  }
  $('library').innerHTML=html||'<span class="mut">Nothing matches.</span>';
 }

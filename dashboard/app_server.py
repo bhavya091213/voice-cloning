@@ -47,7 +47,7 @@ MAX_BODY = 200 * 1024 * 1024
 NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 FILE_RE = re.compile(r"^(reference/[a-z0-9_-]+/(raw|clean|ref|ref_[a-z0-9_]+|prompt_15s|prompt_expressive)\.wav|"
                      r"reference/[a-z0-9_-]+/parts/[A-Z]\.wav|reference/[a-z0-9_-]+/refs/[a-z0-9_-]+\.wav|"
-                     r"work/jobs/job_[a-z0-9_]+/(raw|master)\.wav|output/[A-Za-z0-9_.-]+\.wav)$")
+                     r"work/jobs/job_[a-z0-9_]+/(raw|master)\.wav|output/[A-Za-z0-9_.-]+\.(wav|mp4))$")
 TIMED_LINE = re.compile(r"^\s*\d+:\d{1,2}(?:\.\d+)?\s*-\s*\d+:\d{1,2}(?:\.\d+)?\s+\S")
 TEST_RE = re.compile(r"(test|regress|demo)", re.I)
 
@@ -120,9 +120,27 @@ def presets():
     return {f.stem: read_json(f, {}) for f in sorted((ROOT / "configs" / "presets").glob("*.json"))}
 
 
+def video_seconds(f):
+    """Duration of a video via ffprobe (None when ffprobe is not found)."""
+    exe = shutil.which("ffprobe") or str(Path.home() / "AppData/Local/Microsoft/WinGet/Links/ffprobe.exe")
+    try:
+        r = subprocess.run([exe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(f)],
+                           capture_output=True, text=True, timeout=15)
+        return round(float(r.stdout.strip()), 1)
+    except Exception:
+        return None
+
+
 def outputs():
     rows = []
-    for f in sorted((ROOT / "output").glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True):
+    files = list((ROOT / "output").glob("*.wav")) + list((ROOT / "output").glob("*.mp4"))
+    for f in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.suffix == ".mp4":  # rendered videos (full quality + previews) sit next to the audio
+            rows.append({"file": f.name, "title": f.stem.replace("_", " "), "mtime": f.stat().st_mtime,
+                         "mb": round(f.stat().st_size / 1e6, 1), "seconds": video_seconds(f), "sr": None, "video": True,
+                         "preview": f.stem.endswith("_preview"), "speaker": None, "engine": None, "style": None,
+                         "multi": False, "timed": False, "raw": False, "cfg": None, "lufs": None, "peak": None, "test": False})
+            continue
         meta = read_json(ROOT / "work" / "jobs" / f.stem / "meta.json", {}) or {}
         opts = meta.get("options") or {}
         try:
@@ -233,6 +251,7 @@ class H(BaseHTTPRequestHandler):
         if not FILE_RE.match(rel) or not (ROOT / rel).exists():
             return self._send(404, {"error": "not found"})
         data = (ROOT / rel).read_bytes()
+        ct = "video/mp4" if rel.endswith(".mp4") else "audio/wav"
         extra = {"Accept-Ranges": "bytes"}
         if self._q().get("dl"):
             extra["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
@@ -240,8 +259,8 @@ class H(BaseHTTPRequestHandler):
         if rng and (m := re.match(r"bytes=(\d*)-(\d*)", rng)):
             a = int(m.group(1) or 0)
             b = int(m.group(2)) if m.group(2) else len(data) - 1
-            return self._send(206, data[a:b + 1], "audio/wav", {**extra, "Content-Range": f"bytes {a}-{b}/{len(data)}"})
-        self._send(200, data, "audio/wav", extra)
+            return self._send(206, data[a:b + 1], ct, {**extra, "Content-Range": f"bytes {a}-{b}/{len(data)}"})
+        self._send(200, data, ct, extra)
 
     # ---- POST
     def do_POST(self):
